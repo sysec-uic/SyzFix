@@ -1,0 +1,40 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Virtual environments ───────────────────────────────────
+venv/
+env/
+.venv/
+.env/
+
+# ── Dataset data (too large for git; use HuggingFace Hub) ──
+syzbot-dataset/data/raw/
+syzbot-dataset/data/processed/
+syzbot-dataset/data/dataset/
+syzbot-dataset/data/*.log
+syzbot-dataset/data/*.db
+
+# ── Keep the data directory structure (not its contents) ──
+!syzbot-dataset/data/.gitkeep
+!syzbot-dataset/data/raw/.gitkeep
+!syzbot-dataset/data/processed/.gitkeep
+!syzbot-dataset/data/dataset/.gitkeep
+
+# ── Editor / OS ───────────────────────────────────────────
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Claude internal ───────────────────────────────────────
+.claude/

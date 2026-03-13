@@ -64,7 +64,10 @@ Each entry in the dataset corresponds to one fixed kernel bug and includes:
 ```
 PatchWeaver/
 └── syzbot-dataset/
-    ├── main.py              # CLI entry point
+    ├── main.py              # CLI entry point (collect / export / stats / inspect)
+    ├── view.py              # Interactive dataset explorer
+    ├── retry_missing.py     # Retry failed fetches; show completeness report
+    ├── upload_hf.py         # Upload dataset to HuggingFace Hub
     ├── config.py            # All URLs, rate limits, paths
     ├── models.py            # Data models (BugEntry, FixCommit, Discussion, …)
     ├── utils.py             # Async HTTP client with rate limiting, retry, cache
@@ -114,18 +117,56 @@ python main.py stats
 Example output:
 ```
 ==================================================
-Dataset Statistics
+Dataset Statistics  (3 736 / 6 982 bugs collected)
 ==================================================
-Total processed bugs: 3546
-With crash report:    3541 (99.9%)
-With final patch:     2645 (74.6%)
-With discussion:      2638 (74.4%)
-With patch evolution:  658 (18.6%)
-With reproducer:      2807 (79.2%)
+With crash report:    3726 (99.9%)
+With C reproducer:    2792 (74.9%)
+With patch diff:      2813 (75.3%)
+With discussion:      2823 (75.7%)
+With patch evolution:  676 (18.1%)
 ==================================================
+
+Pipeline Progress:
+  pending  : 3244  █████████████
+  processed: 3738  ████████████████
 ```
 
-### 4. Export the dataset
+### 4. Explore the dataset interactively
+
+```bash
+# Browse all bugs — V=patch versions, P=has patch, D=has discussion
+python view.py list
+python view.py list --has-evolution          # only bugs with v1→v2+ history
+python view.py list --subsystem net -n 20   # filter by keyword
+
+# Full lifecycle for one bug
+python view.py show <bug_id>
+
+# Individual sections
+python view.py crash   <bug_id>              # kernel crash report + C reproducer
+python view.py patch   <bug_id>              # final merged patch diff
+python view.py patch   <bug_id> --version 1  # specific patch version
+python view.py discuss <bug_id>              # email review thread
+python view.py discuss <bug_id> -v 2         # only v2 discussion
+python view.py diff    <bug_id>              # v1 → v2 → final side-by-side
+
+# Search and discover
+python view.py search "use-after-free"
+python view.py random
+```
+
+### 5. Check data completeness & retry failures
+
+```bash
+# Show what's missing and why
+python retry_missing.py stats
+
+# Retry bugs where the patch diff fetch failed (network/repo issues)
+python retry_missing.py patches
+python retry_missing.py patches --limit 100   # batch
+```
+
+### 6. Export the dataset
 
 ```bash
 # JSONL (one JSON object per line, compatible with most fine-tuning tools)
@@ -133,16 +174,26 @@ python main.py export --format jsonl
 
 # HuggingFace Dataset format
 python main.py export --format huggingface
-
-# Custom output path
-python main.py export --format jsonl --output /path/to/output.jsonl
 ```
 
-### 5. Inspect a single bug
+### 7. Upload to HuggingFace Hub
+
+```bash
+# Login once
+huggingface-cli login
+
+# Upload (creates the repo if it doesn't exist)
+python upload_hf.py --repo YOUR_USERNAME/patchweaver-syzbot
+python upload_hf.py --repo YOUR_USERNAME/patchweaver-syzbot --private
+
+# Preview what would be uploaded without making any requests
+python upload_hf.py --repo YOUR_USERNAME/patchweaver-syzbot --dry-run
+```
+
+### 8. Inspect a single bug via CLI
 
 ```bash
 python main.py inspect <bug_id>
-# Example:
 python main.py inspect 001306cd9c92ce0df23f
 ```
 
