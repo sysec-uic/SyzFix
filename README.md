@@ -1,6 +1,6 @@
-# PatchWeaver
+# SyzFix
 
-**PatchWeaver** is a dataset builder that collects fixed Linux kernel bugs from
+**SyzFix** is a dataset builder that collects fixed Linux kernel bugs from
 [syzbot/syzkaller](https://syzkaller.appspot.com/upstream/fixed) and assembles a
 structured dataset capturing the **full bug-fix lifecycle** — from the initial crash
 report through patch iterations and reviewer discussions to the final merged commit.
@@ -62,7 +62,7 @@ Each entry in the dataset corresponds to one fixed kernel bug and includes:
 ## Project Structure
 
 ```
-PatchWeaver/
+SyzFix/
 └── syzbot-dataset/
     ├── main.py              # CLI entry point (collect / export / stats / inspect)
     ├── view.py              # Interactive dataset explorer
@@ -183,11 +183,11 @@ python main.py export --format huggingface
 huggingface-cli login
 
 # Upload (creates the repo if it doesn't exist)
-python upload_hf.py --repo YOUR_USERNAME/patchweaver-syzbot
-python upload_hf.py --repo YOUR_USERNAME/patchweaver-syzbot --private
+python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset
+python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --private
 
 # Preview what would be uploaded without making any requests
-python upload_hf.py --repo YOUR_USERNAME/patchweaver-syzbot --dry-run
+python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --dry-run
 ```
 
 ### 8. Inspect a single bug via CLI
