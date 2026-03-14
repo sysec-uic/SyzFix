@@ -180,7 +180,7 @@ python main.py export --format huggingface
 
 ```bash
 # Login once
-huggingface-cli login
+hf auth login
 
 # Upload (creates the repo if it doesn't exist)
 python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset
@@ -321,3 +321,4 @@ It will skip already-processed bugs and continue from where it left off.
 - **Very large threads** — truncated to 200 emails max
 - **Multi-repo commits** — tries torvalds/linux, then net, net-next, bpf, bpf-next
 - **Bugs without fix commits** — collected anyway (crash report + discussion still useful)
+- **Both syzbot link formats** — handles both `?extid=` and `?id=` bug URLs with automatic fallback
