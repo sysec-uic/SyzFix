@@ -63,23 +63,34 @@ Each entry in the dataset corresponds to one fixed kernel bug and includes:
 
 ```
 SyzFix/
-└── syzbot-dataset/
-    ├── main.py              # CLI entry point (collect / export / stats / inspect)
-    ├── view.py              # Interactive dataset explorer
-    ├── retry_missing.py     # Retry failed fetches; show completeness report
-    ├── upload_hf.py         # Upload dataset to HuggingFace Hub
-    ├── config.py            # All URLs, rate limits, paths
-    ├── models.py            # Data models (BugEntry, FixCommit, Discussion, …)
-    ├── utils.py             # Async HTTP client with rate limiting, retry, cache
-    ├── storage.py           # SQLite progress tracking + JSON file storage
-    ├── pipeline.py          # Main pipeline orchestrating all scrapers
-    ├── export.py            # Export to JSONL / HuggingFace Dataset
-    ├── requirements.txt
-    └── scraper/
-        ├── syzbot.py        # Syzbot JSON API + HTML scraper
-        ├── git_kernel.py    # git.kernel.org patch diff fetcher
-        ├── lore.py          # lore.kernel.org mbox downloader & parser
-        └── patchwork.py     # patchwork.kernel.org fallback scraper
+├── venv/                    # Python virtual environment (project-wide)
+├── syzbot-dataset/          # Data collection pipeline
+│   ├── main.py              # CLI entry point (collect / export / stats / inspect)
+│   ├── view.py              # Interactive dataset explorer
+│   ├── retry_missing.py     # Retry failed fetches; show completeness report
+│   ├── upload_hf.py         # Upload dataset to HuggingFace Hub
+│   ├── config.py            # All URLs, rate limits, paths
+│   ├── models.py            # Data models (BugEntry, FixCommit, Discussion, …)
+│   ├── utils.py             # Async HTTP client with rate limiting, retry, cache
+│   ├── storage.py           # SQLite progress tracking + JSON file storage
+│   ├── pipeline.py          # Main pipeline orchestrating all scrapers
+│   ├── export.py            # Export to JSONL / HuggingFace Dataset
+│   ├── requirements.txt
+│   └── scraper/
+│       ├── syzbot.py        # Syzbot JSON API + HTML scraper
+│       ├── git_kernel.py    # git.kernel.org patch diff fetcher
+│       ├── lore.py          # lore.kernel.org mbox downloader & parser
+│       └── patchwork.py     # patchwork.kernel.org fallback scraper
+└── analysis/                # Dataset analysis (no LLM APIs required)
+    ├── run_all.py           # CLI entry point for all analyses
+    ├── loader.py            # Data loading, models, iterators
+    ├── filters.py           # Noise filtering (bots, stable-review, trivial tags)
+    └── analyzers/
+        ├── base.py              # BaseAnalyzer ABC + AnalysisResult
+        ├── revision_reasons.py  # Why patches need revision (12 categories)
+        ├── discussion_lessons.py# Lessons from human review discussion
+        ├── non_functional.py    # Non-feature revision issues (perf, style, etc.)
+        └── patch_diff_analysis.py # Structural v1→v2 diff comparison
 ```
 
 ---
@@ -89,15 +100,17 @@ SyzFix/
 ### 1. Install dependencies
 
 ```bash
-cd syzbot-dataset
+# Create venv at project root (shared by all subpackages)
 python3 -m venv venv
 source venv/bin/activate     # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r syzbot-dataset/requirements.txt
 ```
 
 ### 2. Collect data
 
 ```bash
+cd syzbot-dataset
+
 # Test with 10 bugs first
 python main.py collect --limit 10
 
@@ -309,6 +322,54 @@ python main.py collect
 ```
 
 It will skip already-processed bugs and continue from where it left off.
+
+---
+
+## Dataset Analysis
+
+The `analysis/` module provides keyword/heuristic-based insights into the dataset — no LLM APIs required.
+
+```bash
+# Run all analyzers
+python -m analysis.run_all
+
+# Run a specific analyzer
+python -m analysis.run_all --analyzer revision
+
+# Quick test on a random sample
+python -m analysis.run_all --sample 500
+
+# List available analyzers
+python -m analysis.run_all --list
+```
+
+### Available Analyzers
+
+| Analyzer | What it answers |
+|----------|----------------|
+| `revision` | Why do patches need revision? Classifies into 12 categories (correctness, incomplete fix, race condition, performance, style, etc.) |
+| `discussion` | Lessons from human review: top reviewers, discussion depth, feedback themes, subsystem breakdown |
+| `nonfunctional` | Are there revisions purely for non-feature issues? (performance, coding style, commit hygiene, build/config) |
+| `patchdiff` | How do patches change structurally between v1 and v2? (size, file scope, growth vs shrink) |
+
+### Adding New Analyzers
+
+Create a new file in `analysis/analyzers/`, subclass `BaseAnalyzer`, implement `analyze()`, and register it in `run_all.py`:
+
+```python
+from analysis.analyzers.base import BaseAnalyzer, AnalysisResult
+
+class MyAnalyzer(BaseAnalyzer):
+    @property
+    def name(self) -> str:
+        return "My Custom Analysis"
+
+    def analyze(self, bugs: list[BugEntry]) -> AnalysisResult:
+        # Your analysis logic here
+        return AnalysisResult(name=self.name, summary={...})
+```
+
+Results are saved to `analysis/results/` as JSON and CSV files.
 
 ---
 

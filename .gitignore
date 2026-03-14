@@ -15,6 +15,9 @@ env/
 .venv/
 .env/
 
+# ── Analysis results (regenerable) ─────────────────────────
+analysis/results/
+
 # ── Dataset data (too large for git; use HuggingFace Hub) ──
 syzbot-dataset/data/raw/
 syzbot-dataset/data/processed/
