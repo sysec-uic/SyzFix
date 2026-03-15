@@ -15,8 +15,12 @@ python -m analysis.run_all --analyzer revision
 # Quick test on a sample
 python -m analysis.run_all --sample 500
 
-# List available analyzers
+# List available analyzers — shows [✓] next to ones with saved results
 python -m analysis.run_all --list
+
+# Print previously saved results without re-running (instant)
+python -m analysis.run_all --show
+python -m analysis.run_all --show --analyzer revision
 ```
 
 | Analyzer | What it answers |
@@ -31,7 +35,7 @@ python -m analysis.run_all --list
 | `difficulty` | Composite difficulty score per bug → easy / medium / hard tiers |
 | `infosuff` | Information sufficiency: reproducer impact, crash report truncation, token overlap, file path prediction |
 
-Results are saved to `analysis/results/` as JSON and CSV.
+Results are saved to `analysis/results/` as JSON and CSV — use `--show` to re-display them without re-running.
 
 ### Bug characterization analyzers
 
