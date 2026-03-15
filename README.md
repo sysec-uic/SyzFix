@@ -7,7 +7,7 @@ report through patch iterations and reviewer discussions to the final merged com
 Intended for fine-tuning language models to generate and review kernel patches,
 and for researching patch evolution patterns in the Linux development process.
 
-> **Code:** https://github.com/sysec-uic/syzfix
+> **Code:** https://github.com/sysec-uic/syzfix  
 > **Dataset:** https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset
 
 ---
