@@ -22,6 +22,7 @@ analysis/results/
 syzbot-dataset/data/raw/
 syzbot-dataset/data/processed/
 syzbot-dataset/data/dataset/
+syzbot-dataset/data/training/
 syzbot-dataset/data/*.log
 syzbot-dataset/data/*.db
 
@@ -30,6 +31,7 @@ syzbot-dataset/data/*.db
 !syzbot-dataset/data/raw/.gitkeep
 !syzbot-dataset/data/processed/.gitkeep
 !syzbot-dataset/data/dataset/.gitkeep
+!syzbot-dataset/data/training/.gitkeep
 
 # ── Editor / OS ───────────────────────────────────────────
 .DS_Store
