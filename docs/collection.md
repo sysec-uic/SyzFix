@@ -1,5 +1,7 @@
 # Data Collection Pipeline
 
+All commands are run from the **project root** (`syzfix/`).
+
 ## Install
 
 ```bash
@@ -8,28 +10,27 @@ cd syzfix
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-cd syzbot-dataset
 ```
 
 ## Collect
 
 ```bash
 # Smoke test (10 bugs)
-python main.py collect --limit 10
+python -m syzbot-dataset.main collect --limit 10
 
 # Full collection (~7 000 bugs, 8–10 hours)
-python main.py collect
+python -m syzbot-dataset.main collect
 
 # Faster: skip patchwork fallback
-python main.py collect --skip-patchwork
+python -m syzbot-dataset.main collect --skip-patchwork
 ```
 
-Progress is saved to `data/progress.db` (SQLite) — simply re-run to resume.
+Progress is saved to `syzbot-dataset/data/progress.db` (SQLite) — simply re-run to resume.
 
 ## Monitor
 
 ```bash
-python main.py stats
+python -m syzbot-dataset.main stats
 ```
 
 ```
@@ -51,37 +52,37 @@ Pipeline Progress:
 
 ```bash
 # Browse — V=versions, P=has patch, D=has discussion
-python view.py list
-python view.py list --has-evolution
-python view.py list --subsystem net -n 20
+python -m syzbot-dataset.view list
+python -m syzbot-dataset.view list --has-evolution
+python -m syzbot-dataset.view list --subsystem net -n 20
 
 # Full lifecycle for one bug
-python view.py show <bug_id>
+python -m syzbot-dataset.view show <bug_id>
 
 # Individual sections
-python view.py crash   <bug_id>
-python view.py patch   <bug_id> --version 1
-python view.py discuss <bug_id> -v 2
-python view.py diff    <bug_id>       # v1 → v2 side-by-side
+python -m syzbot-dataset.view crash   <bug_id>
+python -m syzbot-dataset.view patch   <bug_id> --version 1
+python -m syzbot-dataset.view discuss <bug_id> -v 2
+python -m syzbot-dataset.view diff    <bug_id>       # v1 → v2 side-by-side
 
 # Search
-python view.py search "use-after-free"
-python view.py random
+python -m syzbot-dataset.view search "use-after-free"
+python -m syzbot-dataset.view random
 ```
 
 ## Retry failures
 
 ```bash
-python retry_missing.py stats
-python retry_missing.py patches
-python retry_missing.py patches --limit 100
+python -m syzbot-dataset.retry_missing stats
+python -m syzbot-dataset.retry_missing patches
+python -m syzbot-dataset.retry_missing patches --limit 100
 ```
 
 ## Export
 
 ```bash
-python main.py export --format jsonl
-python main.py export --format huggingface
+python -m syzbot-dataset.main export --format jsonl
+python -m syzbot-dataset.main export --format huggingface
 ```
 
 ## Upload to HuggingFace
@@ -90,16 +91,16 @@ python main.py export --format huggingface
 hf auth login
 
 # Flat structured export (research / analysis)
-python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset
+python -m syzbot-dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset
 
 # Training-format JSONL (5 task configs, ~210 MB, streamed)
-python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --training
+python -m syzbot-dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset --training
 
 # Full processed data for collaborators (~2 GB)
-python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --processed
+python -m syzbot-dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset --processed
 
 # Dry run
-python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --training --dry-run
+python -m syzbot-dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset --training --dry-run
 ```
 
 ## Rate limits

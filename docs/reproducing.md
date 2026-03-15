@@ -11,8 +11,9 @@ cd syzfix
 python3 -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 pip install -r requirements.txt
-cd syzbot-dataset
 ```
+
+All commands below are run from the **project root** (`syzfix/`).
 
 ## Option A — Use training data directly (~210 MB)
 
@@ -44,22 +45,22 @@ Do this to change prompt templates, add new tasks, or filter bugs differently.
 
 ```bash
 # Download and unpack the full per-bug JSON files
-python restore_processed.py --repo xiaoguangwang/syzfix-dataset
+python -m syzbot-dataset.restore_processed --repo xiaoguangwang/syzfix-dataset
 
 # Regenerate all training tasks
-python prepare_training.py --tasks all
+python -m syzbot-dataset.prepare_training --tasks all
 
 # Or a specific task
-python prepare_training.py --tasks bug_to_patch
+python -m syzbot-dataset.prepare_training --tasks bug_to_patch
 ```
 
-`restore_processed.py` streams the file line-by-line — constant RAM usage.
+`restore_processed` streams the file line-by-line — constant RAM usage.
 
 ## Comparison
 
 | | Option A | Option B |
 |---|---|---|
-| Fine-tune immediately | ✅ | ✅ (after `prepare_training.py`) |
+| Fine-tune immediately | ✅ | ✅ (after `prepare_training`) |
 | Change prompt templates | ❌ | ✅ |
 | Add new training tasks | ❌ | ✅ |
 | Re-crawl from syzbot | not needed | not needed |
