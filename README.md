@@ -10,6 +10,81 @@ The dataset is intended for:
 - **Fine-tuning** language models to generate better kernel bug fixes
 - **Researching** patch evolution patterns in the Linux development process
 
+> **Resources**
+> - Code: https://github.com/sysec-uic/syzfix
+> - Dataset: https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset
+
+---
+
+## Reproducing Without Re-crawling
+
+Collaborators can skip the 8–10 hour crawl entirely. The dataset is already on
+HuggingFace; you only need to choose how deeply you want to work with it.
+
+### Step 0 — Clone the repo and install dependencies
+
+```bash
+git clone https://github.com/sysec-uic/syzfix.git
+cd syzfix
+python3 -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r syzbot-dataset/requirements.txt
+cd syzbot-dataset
+```
+
+### Option A — Use the training data directly (fastest, ~210 MB)
+
+Ready-to-use JSONL files in chat/instruction format. No further processing needed.
+
+```python
+from datasets import load_dataset
+
+# SFT: generate a patch from a crash report
+ds = load_dataset("xiaoguangwang/syzfix-dataset", "bug_to_patch")
+print(ds["train"][0])           # {"messages": [{"role": "user", ...}, {"role": "assistant", ...}]}
+
+# DPO/ORPO: preference pairs (better patch vs worse patch)
+dpo = load_dataset("xiaoguangwang/syzfix-dataset", "dpo")
+print(dpo["train"][0])          # {"prompt": ..., "chosen": ..., "rejected": ...}
+```
+
+Available configs:
+
+| Config | Type | Description |
+|--------|------|-------------|
+| `bug_to_patch` | SFT | Crash report → patch diff |
+| `patch_review` | SFT | Bug + patch → reviewer critique |
+| `patch_improvement` | SFT | Bug + v1 patch → improved patch |
+| `dpo` | DPO/ORPO | Preference pairs: better vs worse patch |
+| `commit_message` | SFT | Bug + patch → commit message |
+
+### Option B — Restore full processed data and regenerate training sets (~2 GB download)
+
+Do this if you want to change prompt templates, add new task types, or filter
+bugs differently. The full rich per-bug data (mailing-list threads, all crash
+variants, raw syzbot fields) lives in a single gzipped JSONL on HuggingFace.
+
+```bash
+# Downloads processed/processed.jsonl.gz and unpacks into data/processed/
+python restore_processed.py --repo xiaoguangwang/syzfix-dataset
+
+# Then regenerate training data with your own settings
+python prepare_training.py --tasks all
+```
+
+`restore_processed.py` streams the file and never loads everything into RAM at
+once, so it works on any machine.
+
+### What you get with each option
+
+| | Option A | Option B |
+|---|---|---|
+| Fine-tune immediately | ✅ | ✅ (after `prepare_training.py`) |
+| Change prompt templates | ❌ | ✅ |
+| Add new training tasks | ❌ | ✅ |
+| Re-crawl from syzbot | ❌ not needed | ❌ not needed |
+| Download size | ~210 MB | ~2 GB |
+
 ---
 
 ## What the Dataset Contains
@@ -64,11 +139,14 @@ Each entry in the dataset corresponds to one fixed kernel bug and includes:
 ```
 SyzFix/
 ├── venv/                    # Python virtual environment (project-wide)
-├── syzbot-dataset/          # Data collection pipeline
+├── syzbot-dataset/          # Data collection & training-data pipeline
 │   ├── main.py              # CLI entry point (collect / export / stats / inspect)
 │   ├── view.py              # Interactive dataset explorer
 │   ├── retry_missing.py     # Retry failed fetches; show completeness report
+│   ├── prepare_training.py  # Convert processed data → training-format JSONL
+│   ├── training_config.py   # Prompt templates and task definitions
 │   ├── upload_hf.py         # Upload dataset to HuggingFace Hub
+│   ├── restore_processed.py # Download & unpack processed data from HF
 │   ├── config.py            # All URLs, rate limits, paths
 │   ├── models.py            # Data models (BugEntry, FixCommit, Discussion, …)
 │   ├── utils.py             # Async HTTP client with rate limiting, retry, cache
@@ -195,12 +273,17 @@ python main.py export --format huggingface
 # Login once
 hf auth login
 
-# Upload (creates the repo if it doesn't exist)
+# 1. Flat structured export (research / analysis)
 python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset
-python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --private
 
-# Preview what would be uploaded without making any requests
-python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --dry-run
+# 2. Training-format JSONL files (5 task configs, ~210 MB, streamed — no RAM spike)
+python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --training
+
+# 3. Full processed data (needed for collaborators to run prepare_training.py, ~2 GB)
+python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --processed
+
+# Preview what would be uploaded without actually uploading
+python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --training --dry-run
 ```
 
 ### 8. Inspect a single bug via CLI
@@ -258,7 +341,45 @@ Each exported JSONL entry looks like:
 
 ## Fine-tuning Usage
 
-### Basic: crash → patch
+The training data is pre-formatted and available directly on HuggingFace.
+Use `prepare_training.py` only if you want to customise prompt templates or add new tasks.
+
+### Quickstart with pre-built training data
+
+```python
+from datasets import load_dataset
+
+# SFT — crash report → patch
+ds = load_dataset("xiaoguangwang/syzfix-dataset", "bug_to_patch")
+train = ds["train"]   # ~4 200 examples, each {"messages": [...]}
+
+# DPO/ORPO — preference pairs
+dpo = load_dataset("xiaoguangwang/syzfix-dataset", "dpo")
+# each record: {"prompt": ..., "chosen": ..., "rejected": ...}
+
+# Other tasks
+review      = load_dataset("xiaoguangwang/syzfix-dataset", "patch_review")
+improvement = load_dataset("xiaoguangwang/syzfix-dataset", "patch_improvement")
+commits     = load_dataset("xiaoguangwang/syzfix-dataset", "commit_message")
+```
+
+### Regenerate or customise training data
+
+```bash
+# Restore the full processed data from HF first
+python restore_processed.py --repo xiaoguangwang/syzfix-dataset
+
+# Generate all five tasks (SFT + DPO) into data/training/
+python prepare_training.py --tasks all
+
+# Generate a specific task only
+python prepare_training.py --tasks bug_to_patch
+python prepare_training.py --tasks dpo
+```
+
+Available tasks: `bug_to_patch`, `patch_review`, `patch_improvement`, `dpo`, `commit_message`
+
+### Using the raw flat export
 
 ```python
 import json
@@ -266,7 +387,7 @@ import json
 with open("data/dataset/syzbot_dataset.jsonl") as f:
     samples = [json.loads(line) for line in f]
 
-# Simple instruction-following format
+# Simple instruction-following format (manual)
 training_data = [
     {
         "instruction": f"Fix this Linux kernel bug:\n\n{s['crash_report']}",
@@ -276,24 +397,6 @@ training_data = [
     if s["crash_report"] and s["final_patch_diff"]
 ]
 print(f"{len(training_data)} training pairs")
-```
-
-### Advanced: with patch discussion context
-
-```python
-# Use patch evolution for multi-turn or chain-of-thought training
-rich_samples = [s for s in samples if s["num_patch_versions"] > 1]
-
-for s in rich_samples:
-    messages = [
-        {"role": "user", "content": f"Bug report:\n{s['crash_report']}"},
-    ]
-    for pv in s["patch_evolution"]:
-        # Add each reviewer comment as a turn
-        for msg in pv["discussion"]:
-            messages.append({"role": "assistant" if "patch" in msg["subject"].lower() else "user",
-                             "content": msg["body"]})
-    messages.append({"role": "assistant", "content": s["final_patch_diff"]})
 ```
 
 ---
