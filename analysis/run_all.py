@@ -156,6 +156,51 @@ def run_analysis(analyzer_names: list[str], bugs, output_dir: Path):
     print(f"{'=' * 70}")
 
 
+def show_saved_results(analyzer_names: list[str], output_dir: Path):
+    """Pretty-print already-saved results from result.json files."""
+    for name in analyzer_names:
+        # Derive the directory name the same way save_results() does:
+        #   analyzer_dir = output_dir / result.name.lower().replace(" ", "_")
+        analyzer_full_name = ANALYZERS[name].name
+        analyzer_dir = output_dir / analyzer_full_name.lower().replace(" ", "_")
+        match = analyzer_dir / "result.json" if (analyzer_dir / "result.json").exists() else None
+
+        if match is None:
+            print(f"\n[{name}] No saved results found in {output_dir}")
+            print(f"  Run: python -m analysis.run_all --analyzer {name}")
+            continue
+
+        with open(match) as f:
+            data = json.load(f)
+
+        print(f"\n{'=' * 70}")
+        print(f"  {data['name']}")
+        print(f"{'=' * 70}")
+
+        # Summary
+        summary = data.get("summary", {})
+        if summary:
+            print("\n  Summary:")
+            for k, v in summary.items():
+                print(f"    {k}: {v}")
+
+        # Tables
+        for table_name, rows in data.get("tables", {}).items():
+            if isinstance(rows, list):
+                print_table(table_name, rows)
+            elif isinstance(rows, dict):
+                print_examples(table_name, rows)
+
+        # CSV files alongside result.json (may have more rows than the capped JSON)
+        csv_files = sorted(match.parent.glob("*.csv"))
+        if csv_files:
+            print(f"\n  Full CSV exports:")
+            for csv_path in csv_files:
+                print(f"    {csv_path}")
+
+        print()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="SyzFix Dataset Analysis",
@@ -166,6 +211,8 @@ Examples:
   python -m analysis.run_all --analyzer revision      # Only revision reasons
   python -m analysis.run_all --sample 500             # Quick test on 500 bugs
   python -m analysis.run_all --list                   # List available analyzers
+  python -m analysis.run_all --show                   # Print saved results
+  python -m analysis.run_all --show --analyzer revision  # Print one saved result
         """,
     )
     parser.add_argument(
@@ -188,16 +235,29 @@ Examples:
         action="store_true",
         help="List available analyzers and exit",
     )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Print previously saved results without re-running analysis",
+    )
 
     args = parser.parse_args()
+
+    output_dir = Path(args.output_dir) if args.output_dir else Path(__file__).resolve().parent / "results"
+    analyzer_names = [args.analyzer] if args.analyzer else list(ANALYZERS.keys())
 
     if args.list:
         print("Available analyzers:")
         for name, analyzer in ANALYZERS.items():
-            print(f"  {name:20s} — {analyzer.name}")
+            result_file = output_dir / analyzer.name.lower().replace(" ", "_") / "result.json"
+            status = "✓" if result_file.exists() else " "
+            print(f"  [{status}] {name:20s} — {analyzer.name}")
         return
 
-    output_dir = Path(args.output_dir) if args.output_dir else Path(__file__).resolve().parent / "results"
+    if args.show:
+        show_saved_results(analyzer_names, output_dir)
+        return
+
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load data
@@ -217,7 +277,6 @@ Examples:
     print(f"  Bugs with discussion: {len(disc)}")
 
     # Run analyzers
-    analyzer_names = [args.analyzer] if args.analyzer else list(ANALYZERS.keys())
     run_analysis(analyzer_names, bugs, output_dir)
 
 
