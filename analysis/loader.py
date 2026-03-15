@@ -154,11 +154,24 @@ class BugEntry:
 
     @property
     def crash_report(self) -> str:
-        return self.raw.get("crash_report", "")
+        # First check top-level, then fall back to first crash entry
+        cr = self.raw.get("crash_report", "")
+        if cr:
+            return cr
+        crashes = self.raw.get("crashes", [])
+        if crashes:
+            return crashes[0].get("crash_report", "")
+        return ""
 
     @property
     def c_reproducer(self) -> str:
-        return self.raw.get("c_reproducer", "")
+        cr = self.raw.get("c_reproducer", "")
+        if cr:
+            return cr
+        crashes = self.raw.get("crashes", [])
+        if crashes:
+            return crashes[0].get("c_reproducer", "")
+        return ""
 
     @property
     def subsystem_guess(self) -> str:

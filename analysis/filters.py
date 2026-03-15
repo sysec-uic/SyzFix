@@ -8,6 +8,7 @@ messages and extract only substantive human review feedback.
 """
 
 import re
+from dataclasses import dataclass
 from .loader import Message
 
 # ─── Bot / automated sender patterns ────────────────────────────────────────
@@ -136,3 +137,70 @@ def strip_quoted_text(body: str) -> str:
 def get_review_text(msg: Message) -> str:
     """Get the substantive review text from a message (no quotes, no sigs)."""
     return strip_quoted_text(msg.body)
+
+
+# ─── Stack trace parsing ──────────────────────────────────────────────────
+
+# Matches kernel stack trace entries like:
+#   [<ffffffff81234567>] function_name+0x1a/0x30 path/to/file.c:123
+#   function_name+0x1a/0x30 path/to/file.c:123
+#   function_name+0x1a/0x30
+# Also handles inline annotations:
+#   func1 include/linux/foo.h:45 [inline]
+#   func2+0x1a/0x30 net/core/bar.c:678
+_STACK_FRAME_RE = re.compile(
+    r'(?:\[<[0-9a-f]+>\]\s*)?'               # optional addr
+    r'(\w+)\+'                                 # function name
+    r'0x[0-9a-f]+/0x[0-9a-f]+'               # offset/size
+    r'(?:\s+(\S+\.(?:c|h|S)):(\d+))?'        # optional file:line
+)
+
+_INLINE_FRAME_RE = re.compile(
+    r'(\w+)\s+(\S+\.(?:c|h|S)):(\d+)\s+\[inline\]'
+)
+
+
+@dataclass
+class StackFrame:
+    """A single frame in a kernel stack trace."""
+    function: str
+    file: str      # may be empty if not available
+    line: int      # 0 if not available
+    is_inline: bool = False
+
+
+def parse_stack_trace(crash_report: str) -> list[StackFrame]:
+    """Parse kernel stack trace from a crash report.
+
+    Returns a list of StackFrame objects in order from top (crash site)
+    to bottom of the call stack.
+    """
+    if not crash_report:
+        return []
+
+    frames = []
+    seen = set()
+
+    for line in crash_report.split("\n"):
+        # Try inline frame first
+        m = _INLINE_FRAME_RE.search(line)
+        if m:
+            func, filepath, lineno = m.group(1), m.group(2), int(m.group(3))
+            key = (func, filepath, lineno)
+            if key not in seen:
+                seen.add(key)
+                frames.append(StackFrame(func, filepath, lineno, is_inline=True))
+            continue
+
+        # Try regular stack frame
+        m = _STACK_FRAME_RE.search(line)
+        if m:
+            func = m.group(1)
+            filepath = m.group(2) or ""
+            lineno = int(m.group(3)) if m.group(3) else 0
+            key = (func, filepath, lineno)
+            if key not in seen:
+                seen.add(key)
+                frames.append(StackFrame(func, filepath, lineno))
+
+    return frames

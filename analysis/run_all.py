@@ -28,6 +28,11 @@ from analysis.analyzers.revision_reasons import RevisionReasonsAnalyzer
 from analysis.analyzers.discussion_lessons import DiscussionLessonsAnalyzer
 from analysis.analyzers.non_functional import NonFunctionalAnalyzer
 from analysis.analyzers.patch_diff_analysis import PatchDiffAnalyzer
+from analysis.analyzers.bug_type_classifier import BugTypeClassifier
+from analysis.analyzers.fix_patterns import FixPatternAnalyzer
+from analysis.analyzers.fix_locality import FixLocalityAnalyzer
+from analysis.analyzers.difficulty_stratification import DifficultyStratificationAnalyzer
+from analysis.analyzers.information_sufficiency import InformationSufficiencyAnalyzer
 
 # ─── Registry of available analyzers ────────────────────────────────────────
 
@@ -36,6 +41,11 @@ ANALYZERS = {
     "discussion": DiscussionLessonsAnalyzer(),
     "nonfunctional": NonFunctionalAnalyzer(),
     "patchdiff": PatchDiffAnalyzer(),
+    "bugtype": BugTypeClassifier(),
+    "fixpattern": FixPatternAnalyzer(),
+    "locality": FixLocalityAnalyzer(),
+    "difficulty": DifficultyStratificationAnalyzer(),
+    "infosuff": InformationSufficiencyAnalyzer(),
 }
 
 
