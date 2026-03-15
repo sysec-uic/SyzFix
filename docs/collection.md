@@ -50,25 +50,7 @@ Pipeline Progress:
 
 ## Explore interactively
 
-```bash
-# Browse — V=versions, P=has patch, D=has discussion
-python -m syzbot-dataset.view list
-python -m syzbot-dataset.view list --has-evolution
-python -m syzbot-dataset.view list --subsystem net -n 20
-
-# Full lifecycle for one bug
-python -m syzbot-dataset.view show <bug_id>
-
-# Individual sections
-python -m syzbot-dataset.view crash   <bug_id>
-python -m syzbot-dataset.view patch   <bug_id> --version 1
-python -m syzbot-dataset.view discuss <bug_id> -v 2
-python -m syzbot-dataset.view diff    <bug_id>       # v1 → v2 side-by-side
-
-# Search
-python -m syzbot-dataset.view search "use-after-free"
-python -m syzbot-dataset.view random
-```
+See **[exploring.md](exploring.md)** for the full reference.
 
 ## Retry failures
 

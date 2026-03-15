@@ -3,6 +3,8 @@
 All analysis tools run locally — no LLM APIs required.
 Run from the **project root** with the venv activated.
 
+To inspect individual bugs before or alongside running the analyzers, see **[exploring.md](exploring.md)**.
+
 ## Heuristic analyzers
 
 ```bash

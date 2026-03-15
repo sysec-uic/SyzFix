@@ -56,6 +56,8 @@ python -m syzbot-dataset.prepare_training --tasks bug_to_patch
 
 `restore_processed` streams the file line-by-line — constant RAM usage.
 
+Once restored, you can browse individual bugs with the interactive viewer — see **[exploring.md](exploring.md)**.
+
 ## Comparison
 
 | | Option A | Option B |
