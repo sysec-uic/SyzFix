@@ -1,0 +1,123 @@
+# Data Collection Pipeline
+
+## Install
+
+```bash
+git clone https://github.com/sysec-uic/syzfix.git
+cd syzfix
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cd syzbot-dataset
+```
+
+## Collect
+
+```bash
+# Smoke test (10 bugs)
+python main.py collect --limit 10
+
+# Full collection (~7 000 bugs, 8–10 hours)
+python main.py collect
+
+# Faster: skip patchwork fallback
+python main.py collect --skip-patchwork
+```
+
+Progress is saved to `data/progress.db` (SQLite) — simply re-run to resume.
+
+## Monitor
+
+```bash
+python main.py stats
+```
+
+```
+==================================================
+Dataset Statistics  (3 736 / 6 982 bugs collected)
+==================================================
+With crash report:    3726 (99.9%)
+With C reproducer:    2792 (74.9%)
+With patch diff:      2813 (75.3%)
+With discussion:      2823 (75.7%)
+With patch evolution:  676 (18.1%)
+==================================================
+Pipeline Progress:
+  pending  : 3244  █████████████
+  processed: 3738  ████████████████
+```
+
+## Explore interactively
+
+```bash
+# Browse — V=versions, P=has patch, D=has discussion
+python view.py list
+python view.py list --has-evolution
+python view.py list --subsystem net -n 20
+
+# Full lifecycle for one bug
+python view.py show <bug_id>
+
+# Individual sections
+python view.py crash   <bug_id>
+python view.py patch   <bug_id> --version 1
+python view.py discuss <bug_id> -v 2
+python view.py diff    <bug_id>       # v1 → v2 side-by-side
+
+# Search
+python view.py search "use-after-free"
+python view.py random
+```
+
+## Retry failures
+
+```bash
+python retry_missing.py stats
+python retry_missing.py patches
+python retry_missing.py patches --limit 100
+```
+
+## Export
+
+```bash
+python main.py export --format jsonl
+python main.py export --format huggingface
+```
+
+## Upload to HuggingFace
+
+```bash
+hf auth login
+
+# Flat structured export (research / analysis)
+python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset
+
+# Training-format JSONL (5 task configs, ~210 MB, streamed)
+python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --training
+
+# Full processed data for collaborators (~2 GB)
+python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --processed
+
+# Dry run
+python upload_hf.py --repo YOUR_USERNAME/syzfix-dataset --training --dry-run
+```
+
+## Rate limits
+
+| Domain | Rate | Notes |
+|--------|------|-------|
+| syzkaller.appspot.com | 0.25 req/s | 1 request per 4 seconds |
+| lore.kernel.org | 1 req/s | |
+| git.kernel.org | 1 req/s | |
+| patchwork.kernel.org | 1 req/s | |
+
+## Corner cases handled
+
+- **Missing patch hash** — falls back to lore search by commit title
+- **Google Groups links** — skipped; lore links used instead
+- **Non-lore discussion URLs** — filtered out automatically
+- **429 rate limiting** — exponential backoff (up to 3 retries)
+- **Very large threads** — truncated to 200 emails max
+- **Multi-repo commits** — tries torvalds/linux, then net, net-next, bpf, bpf-next
+- **Bugs without fix commits** — collected anyway (crash + discussion still useful)
+- **Both syzbot URL formats** — handles `?extid=` and `?id=` with automatic fallback
