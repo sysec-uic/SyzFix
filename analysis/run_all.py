@@ -33,6 +33,7 @@ from analysis.analyzers.fix_patterns import FixPatternAnalyzer
 from analysis.analyzers.fix_locality import FixLocalityAnalyzer
 from analysis.analyzers.difficulty_stratification import DifficultyStratificationAnalyzer
 from analysis.analyzers.information_sufficiency import InformationSufficiencyAnalyzer
+from analysis.analyzers.case_study_finder import CaseStudyFinder
 
 # ─── Registry of available analyzers ────────────────────────────────────────
 
@@ -46,6 +47,7 @@ ANALYZERS = {
     "locality": FixLocalityAnalyzer(),
     "difficulty": DifficultyStratificationAnalyzer(),
     "infosuff": InformationSufficiencyAnalyzer(),
+    "casestudy": CaseStudyFinder(),
 }
 
 

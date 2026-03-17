@@ -36,6 +36,7 @@ python -m analysis.run_all --show --analyzer revision
 | `locality` | Distance from crash site to fix site (same function, same file, same directory, different subsystem) |
 | `difficulty` | Composite difficulty score per bug → easy / medium / hard tiers |
 | `infosuff` | Information sufficiency: reproducer impact, crash report truncation, token overlap, file path prediction |
+| `casestudy` | Case study finder: ranks bugs by composite "interestingness" score across 7 dimensions; surfaces paper-friendly examples |
 
 Results are saved to `analysis/results/` as JSON and CSV — use `--show` to re-display them without re-running.
 
@@ -65,6 +66,47 @@ score per bug using: patch size, number of files modified, patch iterations,
 fix locality, time-to-fix, and reproducer availability. Bugs are grouped into
 easy / medium / hard tiers. Reports per-tier statistics and feature contribution
 breakdown.
+
+**Case Study Finder** (`casestudy`) ranks every bug with a patch diff by a
+composite *interestingness* score (max 21) across seven dimensions:
+
+| Dimension | Signal | Max pts |
+|-----------|--------|---------|
+| Patch iterations | `num_patch_versions` | 3 |
+| Discussion depth | Human review count (bots and stable-backport threads excluded) | 3 |
+| Structural change | abs(v2 lines − v1 lines) | 3 |
+| Fix time | Days from first crash to merged fix | 3 |
+| Fix locality | Crash site → fix site distance | 3 |
+| Scope change | abs(v2 files − v1 files) | 3 |
+| Info scarcity | Missing C reproducer / syz reproducer / stack trace | 3 |
+
+Each bug entry reports all dimension scores, per-version patch sizes (`v1_lines`,
+`v2_lines`), the final merged patch size, and a `paper_friendly` flag (True when
+the final patch is ≤ 50 lines — small enough to include in a paper figure).
+Auto-generated narrative hooks summarise what makes each case compelling.
+
+Three result tables are saved:
+- `ranked_candidates`: top 50 by composite score, all metrics
+- `top_paper_friendly`: top 20 filtered to paper-friendly cases
+- `top_by_dimension`: top 5 per dimension (for picking diverse case studies)
+
+After running the analyzer, generate paper-ready markdown narratives for your
+chosen bugs with:
+
+```bash
+# Run the analyzer
+python -m analysis.run_all --analyzer casestudy
+
+# Top 4 paper-friendly narratives (reads saved results)
+python -m analysis.generate_case_study --from-results --paper-friendly --top 4
+
+# Narratives for specific bug IDs (partial IDs supported)
+python -m analysis.generate_case_study 0438378d6f157baae1a2 94cc2a66fc228b23f360
+```
+
+Each narrative includes: overview, per-version patch complexity table, first
+20 lines of the crash report, patch version timeline, top review highlights
+per version, and the full final fix diff (truncated to 30 lines if > 60 lines).
 
 **Information Sufficiency** (`infosuff`) analyzes what input signals are
 available and how they correlate with fix properties:

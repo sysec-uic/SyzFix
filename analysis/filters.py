@@ -169,6 +169,30 @@ class StackFrame:
     is_inline: bool = False
 
 
+def is_stable_backport_thread(disc) -> bool:
+    """Check if a discussion thread is a stable-review backport (noise for analysis).
+
+    Matches:
+    - Subjects like "[PATCH 5.4 000/389] 5.4.211-rc1 review"
+    - AUTOSEL subjects
+    - Very large v1 threads (50+ messages) that are typically backport series
+    """
+    subj = disc.subject
+    # Stable review series: [PATCH X.Y NNN/MMM]
+    if re.search(r'\[PATCH\s+\d+\.\d+\s+\d+/\d+\]', subj):
+        return True
+    # AUTOSEL messages
+    if 'AUTOSEL' in subj:
+        return True
+    # Stable review cycle in subject
+    if re.search(r'\d+\.\d+[\.\d]*-rc\d+\s+review', subj, re.I):
+        return True
+    # Large v1 threads are almost always stable backport series
+    if disc.patch_version == 1 and len(disc.messages) >= 50:
+        return True
+    return False
+
+
 def parse_stack_trace(crash_report: str) -> list[StackFrame]:
     """Parse kernel stack trace from a crash report.
 
