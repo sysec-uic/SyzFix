@@ -37,6 +37,7 @@ python -m analysis.run_all --show --analyzer revision
 | `difficulty` | Composite difficulty score per bug → easy / medium / hard tiers |
 | `infosuff` | Information sufficiency: reproducer impact, crash report truncation, token overlap, file path prediction |
 | `casestudy` | Case study finder: ranks bugs by composite "interestingness" score across 7 dimensions; surfaces paper-friendly examples |
+| `insights` | Insight clusters: cross-references bug type × fix pattern × locality × revision reasons to find named categories of interesting bugs |
 
 Results are saved to `analysis/results/` as JSON and CSV — use `--show` to re-display them without re-running.
 
@@ -107,6 +108,28 @@ python -m analysis.generate_case_study 0438378d6f157baae1a2 94cc2a66fc228b23f360
 Each narrative includes: overview, per-version patch complexity table, first
 20 lines of the crash report, patch version timeline, top review highlights
 per version, and the full final fix diff (truncated to 30 lines if > 60 lines).
+
+**Insight Clusters** (`insights`) cross-references bug type, fix pattern,
+locality, difficulty, and revision reasons to identify eight named categories
+of bugs that share interesting characteristics. Each cluster is defined by a
+predicate over per-bug features, and the analyzer reports statistics,
+representative examples, overlap analysis, and a "paper insight" text.
+
+| Cluster | Rule | Description |
+|---------|------|-------------|
+| Misleading Symptoms | Bug type suggests pattern X, fix uses pattern Y | Surface symptom misleads diagnosis |
+| Deceptively Simple | Final patch ≤ 10 lines, but > 180 days or ≥ 3 iterations | Difficulty is in understanding, not code |
+| Approach Revolution | > 50% structural change between v1 and v2 | Developer completely changed approach |
+| Cross-Subsystem Root Cause | Fix in different subsystem from crash | Requires deep architectural knowledge |
+| Review-Rescued | Revision reasons include correctness / incomplete fix | Community review caught critical issues |
+| Long-Lived (> 1 year) | fix_days > 365 | What makes some bugs fundamentally harder |
+| Concurrency Labyrinth | Deadlock/data-race type, add-lock fix, or race revision | Concurrency as a distinct challenge class |
+| Information Desert | No C or syz reproducer | Fixed from crash report alone |
+
+Three result tables:
+- `cluster_overview`: per-cluster count, statistics, top bug types and fix patterns
+- `cluster_overlap`: pairwise overlap between clusters (bugs in multiple categories)
+- `membership_distribution`: how many clusters each bug belongs to
 
 **Information Sufficiency** (`infosuff`) analyzes what input signals are
 available and how they correlate with fix properties:
