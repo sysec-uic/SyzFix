@@ -35,6 +35,7 @@ from analysis.analyzers.difficulty_stratification import DifficultyStratificatio
 from analysis.analyzers.information_sufficiency import InformationSufficiencyAnalyzer
 from analysis.analyzers.case_study_finder import CaseStudyFinder
 from analysis.analyzers.insight_clusters import InsightClusterAnalyzer
+from analysis.analyzers.patch_evolution import PatchEvolutionAnalyzer
 
 # ─── Registry of available analyzers ────────────────────────────────────────
 
@@ -50,6 +51,7 @@ ANALYZERS = {
     "infosuff": InformationSufficiencyAnalyzer(),
     "casestudy": CaseStudyFinder(),
     "insights": InsightClusterAnalyzer(),
+    "evolution": PatchEvolutionAnalyzer(),
 }
 
 

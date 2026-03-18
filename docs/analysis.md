@@ -38,6 +38,7 @@ python -m analysis.run_all --show --analyzer revision
 | `infosuff` | Information sufficiency: reproducer impact, crash report truncation, token overlap, file path prediction |
 | `casestudy` | Case study finder: ranks bugs by composite "interestingness" score across 7 dimensions; surfaces paper-friendly examples |
 | `insights` | Insight clusters: cross-references bug type × fix pattern × locality × revision reasons to find named categories of interesting bugs |
+| `evolution` | **Patch evolution causal analysis**: links reviewer feedback on vN to structural changes in vN+1, across all consecutive version transitions |
 
 Results are saved to `analysis/results/` as JSON and CSV — use `--show` to re-display them without re-running.
 
@@ -137,6 +138,48 @@ available and how they correlate with fix properties:
 - Crash report truncation analysis (how many stack frames are retained in first N lines)
 - Token overlap (Jaccard) between crash report / reproducer and patch diff
 - File path prediction accuracy (can the fix file be predicted from the stack trace?)
+
+### Patch Evolution Causal Analysis (`evolution`)
+
+This is the **key differentiator** of SyzFix over prior datasets — it captures not just *that* patches evolve, but *why* and *how*: which reviewer feedback drove each revision, and what changed as a result.
+
+```bash
+# Run on full dataset (~17 seconds)
+python -m analysis.run_all --analyzer evolution
+
+# Quick test on a small sample
+python -m analysis.run_all --analyzer evolution --sample 200
+
+# Re-display saved results without re-running
+python -m analysis.run_all --show --analyzer evolution
+```
+
+For every bug with ≥ 2 patch versions, it analyzes **every consecutive vN → vN+1 transition**:
+
+1. Extracts human reviews from vN's discussion thread (filters out bots, stable-backport noise, trivial tag-only replies)
+2. Classifies each review into the same 12 feedback categories used by the `revision` analyzer (correctness, incomplete_fix, race_condition, …)
+3. Extracts actionable feedback snippets (imperative verbs, requests, suggestions)
+4. Extracts "Changes since vN" changelog notes from the vN+1 patch submission
+5. Classifies the changelog text with the same taxonomy to detect which feedback was explicitly acknowledged
+6. Computes the structural diff delta between vN and vN+1 (line count change, files added/removed, scope change)
+7. Measures time from last review on vN to first submission of vN+1
+
+Four CSV tables are saved to `analysis/results/patch_evolution_causal_analysis/`:
+
+| File | Rows | What it contains |
+|------|------|-----------------|
+| `iteration_transitions.csv` | One per vN→vN+1 | bug_id, from/to version, num_reviews, feedback_categories, changelog_categories, line_delta, scope_change, time_to_next_hours, responsiveness_score |
+| `feedback_impact.csv` | One per category | How often each feedback category appears, average structural change it causes, how often it appears in changelogs |
+| `evolution_summary.csv` | One per bug | Total reviews, feedback items, line delta, avg responsiveness, across all transitions |
+| `response_patterns.csv` | One per category | How often each category is addressed in the next version's changelog, median response time |
+
+**Key findings from the full dataset (1,099 bugs, 1,600 transitions):**
+
+- 78% of transitions have substantive human reviewer feedback
+- 36% of transitions have explicit "Changes since vN" changelog notes
+- Top feedback categories: `correctness` (42%), `commit_message` (40%), `api_design` (37%)
+- Highest structural impact: `performance` (avg 53 lines changed), `style_convention` (51), `race_condition` (48)
+- Best changelog alignment: `commit_message` (21%), `api_design` (15%), `style_convention` (13%) — most feedback is implicit, not written into changelogs
 
 ### Adding a new analyzer
 
