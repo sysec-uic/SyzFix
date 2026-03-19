@@ -36,6 +36,7 @@ from analysis.analyzers.information_sufficiency import InformationSufficiencyAna
 from analysis.analyzers.case_study_finder import CaseStudyFinder
 from analysis.analyzers.insight_clusters import InsightClusterAnalyzer
 from analysis.analyzers.patch_evolution import PatchEvolutionAnalyzer
+from analysis.analyzers.backport_downstream import BackportDownstreamAnalyzer
 
 # ─── Registry of available analyzers ────────────────────────────────────────
 
@@ -52,6 +53,7 @@ ANALYZERS = {
     "casestudy": CaseStudyFinder(),
     "insights": InsightClusterAnalyzer(),
     "evolution": PatchEvolutionAnalyzer(),
+    "backport": BackportDownstreamAnalyzer(),
 }
 
 

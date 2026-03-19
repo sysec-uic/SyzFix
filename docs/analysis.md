@@ -39,6 +39,7 @@ python -m analysis.run_all --show --analyzer revision
 | `casestudy` | Case study finder: ranks bugs by composite "interestingness" score across 7 dimensions; surfaces paper-friendly examples |
 | `insights` | Insight clusters: cross-references bug type × fix pattern × locality × revision reasons to find named categories of interesting bugs |
 | `evolution` | **Patch evolution causal analysis**: links reviewer feedback on vN to structural changes in vN+1, across all consecutive version transitions |
+| `backport` | **Patch downstream propagation**: stable-targeting intent (Cc:stable, Fixes: tag), LTS version coverage, backport lag, and subsystem backport rates |
 
 Results are saved to `analysis/results/` as JSON and CSV — use `--show` to re-display them without re-running.
 
@@ -180,6 +181,54 @@ Four CSV tables are saved to `analysis/results/patch_evolution_causal_analysis/`
 - Top feedback categories: `correctness` (42%), `commit_message` (40%), `api_design` (37%)
 - Highest structural impact: `performance` (avg 53 lines changed), `style_convention` (51), `race_condition` (48)
 - Best changelog alignment: `commit_message` (21%), `api_design` (15%), `style_convention` (13%) — most feedback is implicit, not written into changelogs
+
+### Backport Downstream Propagation (`backport`)
+
+Linux kernel fixes follow a lifecycle unique among open-source projects: a patch
+lands on mainline first, then gets cherry-picked into active stable/LTS branches
+(4.14, 4.19, 5.4, 5.10, 5.15, 6.1, …) by stable maintainers. This analyzer
+extracts and quantifies that downstream propagation.
+
+```bash
+# Run on full dataset
+python -m analysis.run_all --analyzer backport
+
+# Quick test on a sample
+python -m analysis.run_all --analyzer backport --sample 500
+
+# Re-display saved results
+python -m analysis.run_all --show --analyzer backport
+```
+
+**Signals extracted per bug:**
+
+| Signal | Source | What it means |
+|--------|--------|---------------|
+| `cc_stable` | Fix commit diff / patch submission email | Author explicitly targeted stable trees |
+| `fixes_tag` | Fix commit diff | `Fixes: <hash>` tag — stable maintainers auto-pick these |
+| `target_versions` | Stable review thread subjects | Which LTS branches actually received the fix |
+| `num_lts_versions` | Counted from above | Breadth of downstream coverage |
+| `backport_lag_days` | Upstream commit date → first stable review thread | How quickly a fix propagates downstream |
+
+**Six output tables** saved to `analysis/results/backport_downstream_propagation/`:
+
+| Table | What it shows |
+|-------|--------------|
+| `lts_version_distribution` | Bug count backported to each LTS version (4.19, 4.14, 4.9, 5.4 dominate) |
+| `stable_intent_signals` | Breakdown: Cc:stable only / Fixes: only / both / neither |
+| `backport_lag_distribution` | Time-to-backport in buckets (0–3, 4–7, 8–14, 15–30, 31–60, 60+ days) |
+| `subsystem_backport_rates` | Which subsystems get backported most (drivers/kernel ~65–70%) |
+| `coverage_tiers` | How many LTS versions each bug reaches (0 / 1 / 2–3 / 4–5 / 6+) |
+| `top_backport_coverage` | Examples of bugs with the widest LTS backport coverage |
+
+**Key findings from the full dataset (5,043 bugs with fix diffs):**
+- 40.0% of fixes (2,018) have stable backport threads
+- Each backported fix reaches an average of **3.9 LTS versions**
+- Median backport lag is **16.5 days** after upstream merge
+- `Fixes:` tag is present on 61.6% of fixes; `Cc: stable` on only 17.2% — backporting is largely implicit via automation
+- 33.0% of fixes have neither signal and never reach stable kernels
+- Top LTS recipients: 4.14 (49.3%), 4.19 (45.8%), 4.9 (41.2%), 5.4 (37.2%)
+- `sound/` (65.7%), `crypto/` (57.9%), and `drivers/` (54.1%) have the highest backport rates; `io_uring/` (14.8%) the lowest
 
 ### Adding a new analyzer
 
