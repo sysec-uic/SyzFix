@@ -37,6 +37,7 @@ from analysis.analyzers.case_study_finder import CaseStudyFinder
 from analysis.analyzers.insight_clusters import InsightClusterAnalyzer
 from analysis.analyzers.patch_evolution import PatchEvolutionAnalyzer
 from analysis.analyzers.backport_downstream import BackportDownstreamAnalyzer
+from analysis.analyzers.backport_comparison import BackportComparisonAnalyzer
 
 # ─── Registry of available analyzers ────────────────────────────────────────
 
@@ -54,6 +55,7 @@ ANALYZERS = {
     "insights": InsightClusterAnalyzer(),
     "evolution": PatchEvolutionAnalyzer(),
     "backport": BackportDownstreamAnalyzer(),
+    "backport-gt": BackportComparisonAnalyzer(),
 }
 
 

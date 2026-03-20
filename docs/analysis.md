@@ -40,6 +40,7 @@ python -m analysis.run_all --show --analyzer revision
 | `insights` | Insight clusters: cross-references bug type × fix pattern × locality × revision reasons to find named categories of interesting bugs |
 | `evolution` | **Patch evolution causal analysis**: links reviewer feedback on vN to structural changes in vN+1, across all consecutive version transitions |
 | `backport` | **Patch downstream propagation**: stable-targeting intent (Cc:stable, Fixes: tag), LTS version coverage, backport lag, and subsystem backport rates |
+| `backport-gt` | **Ground-truth backport comparison**: matches syzbot fix commits against 324k cherry-picks in linux-stable.git; compares coverage depth and lag against all-kernel baseline |
 
 Results are saved to `analysis/results/` as JSON and CSV — use `--show` to re-display them without re-running.
 
@@ -229,6 +230,94 @@ python -m analysis.run_all --show --analyzer backport
 - 33.0% of fixes have neither signal and never reach stable kernels
 - Top LTS recipients: 4.14 (49.3%), 4.19 (45.8%), 4.9 (41.2%), 5.4 (37.2%)
 - `sound/` (65.7%), `crypto/` (57.9%), and `drivers/` (54.1%) have the highest backport rates; `io_uring/` (14.8%) the lowest
+
+### Backport Ground Truth Comparison (`backport-gt`)
+
+This analyzer provides a **ground-truth comparison** of syzbot fix backport patterns
+against the full Linux kernel baseline, using the actual cherry-pick history extracted
+from `linux-stable.git`.  Rather than inferring backport coverage from discussion
+threads (as `backport` does), it directly looks up each syzbot fix commit hash in the
+stable tree's 10+ year cherry-pick history.
+
+#### Prerequisites
+
+You need a bare clone of `linux-stable.git` (~6 GB) and the extracted cherry-pick map:
+
+```bash
+# 1. Clone linux-stable (one-time, ~6 GB)
+git clone --bare \
+    git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git \
+    syzbot-dataset/data/raw/linux-stable.git
+
+# 2. Extract cherry-pick mappings (~5–15 min)
+python -m syzbot-dataset.scraper.stable_cherrypick
+
+# 3. Run the analyzer
+python -m analysis.run_all --analyzer backport-gt
+```
+
+The extraction produces `syzbot-dataset/data/processed/cherrypick_map.json` (~52 MB),
+containing 324,968 cherry-picks across 81 stable branches.  Once extracted, the
+analyzer runs in seconds.
+
+```bash
+# Re-display saved results without re-running
+python -m analysis.run_all --show --analyzer backport-gt
+```
+
+#### How the cherry-pick extractor works
+
+`syzbot-dataset/scraper/stable_cherrypick.py` walks every `linux-X.Y.y` branch in the
+bare repo and parses two upstream-reference patterns from commit bodies:
+
+| Pattern | Example | Used by |
+|---------|---------|---------|
+| `(cherry picked from commit HASH)` | Standard `git cherry-pick -x` | Most stable commits |
+| `[ Upstream commit HASH ]` | `[ Upstream commit a1b2c3... ]` | Stable maintainer format |
+
+For each match, it records the upstream hash, stable hash, branch, and commit date.
+Upstream commit dates are pulled from the stable repo's `master` branch so backport
+lag can be computed without requiring a separate torvalds/linux clone.
+
+#### Six output tables
+
+Saved to `analysis/results/backport_ground_truth_comparison/`:
+
+| Table | What it shows |
+|-------|--------------|
+| `backport_rate_comparison` | Side-by-side syzbot vs. all-kernel: commits, backport rate, avg branches, median lag |
+| `per_branch_rates` | Per-LTS-version: all-kernel picks vs. syzbot picks for every branch from 3.0 to 6.x |
+| `lag_comparison` | Median backport lag per branch for syzbot vs. all-kernel |
+| `coverage_tiers_comparison` | Distribution of LTS coverage breadth (0 / 1 / 2–3 / 4–5 / 6+ branches) |
+| `subsystem_comparison` | Per-subsystem syzbot backport rate (ground-truth) |
+| `syzbot_missing_backports` | Syzbot fixes whose upstream hash is absent from all stable branches |
+
+#### Key findings (full dataset, 6,946 bugs)
+
+| Metric | Syzbot fixes | All-kernel baseline |
+|--------|-------------|---------------------|
+| Commits examined | 6,949 | 92,414 unique upstream |
+| Found in stable trees | **2,694 (38.8%)** | 92,414 (100%, by definition) |
+| Avg stable branches per backported fix | **3.72** | 3.52 |
+| Median backport lag | **40.5 days** | 35.0 days |
+
+Coverage tiers (syzbot vs. all-kernel):
+
+| Branches reached | Syzbot | All-kernel |
+|-----------------|--------|------------|
+| 0 (not backported) | 61.2% | — |
+| 1 | 9.2% | 33.9% |
+| 2–3 | 11.1% | 36.4% |
+| 4–5 | 7.7% | 15.2% |
+| 6+ | 10.8% | 14.5% |
+
+**Interpretation:** When a syzbot fix *is* backported, it propagates slightly more
+broadly than the average kernel fix (3.72 vs 3.52 branches) and takes slightly longer
+to appear (40.5 vs 35.0 days median lag) — consistent with syzbot fixes targeting
+security-sensitive memory-safety bugs that require careful review before backporting.
+The 61.2% of syzbot fixes absent from stable trees represents fixes that either (a)
+lack `Fixes:`/`Cc:stable` signals, (b) address mainline-only subsystems (e.g.,
+`io_uring`), or (c) are too recent to have been backported yet.
 
 ### Adding a new analyzer
 

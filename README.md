@@ -79,6 +79,7 @@ mailing-list discussions. Up to 9 patch versions captured per bug.
 | [lore.kernel.org](https://lore.kernel.org) | Mailing list threads, patch versions |
 | [git.kernel.org](https://git.kernel.org) | Patch diffs |
 | [patchwork.kernel.org](https://patchwork.kernel.org) | Patch series fallback |
+| linux-stable.git (optional) | 10+ years of stable/LTS cherry-picks for ground-truth backport analysis |
 
 ---
 
@@ -105,9 +106,10 @@ SyzFix/
 │       ├── syzbot.py            # syzbot JSON API + HTML
 │       ├── git_kernel.py        # git.kernel.org patch diffs
 │       ├── lore.py              # lore.kernel.org mbox threads
-│       └── patchwork.py         # patchwork fallback
+│       ├── patchwork.py         # patchwork fallback
+│       └── stable_cherrypick.py # Extract cherry-pick map from linux-stable.git
 └── analysis/                    # Heuristic dataset analysis
-    ├── run_all.py               # Run all analyzers
+    ├── run_all.py               # Run all analyzers (13 total)
     ├── plot_iteration_timeline.py  # Figure 1: patch iteration timeline
     ├── loader.py
     ├── filters.py
@@ -115,5 +117,14 @@ SyzFix/
         ├── revision_reasons.py
         ├── discussion_lessons.py
         ├── non_functional.py
-        └── patch_diff_analysis.py
+        ├── patch_diff_analysis.py
+        ├── fix_patterns.py
+        ├── fix_locality.py
+        ├── difficulty_stratification.py
+        ├── information_sufficiency.py
+        ├── case_study_finder.py
+        ├── insight_clusters.py
+        ├── patch_evolution.py
+        ├── backport_downstream.py   # Backport signals from discussion threads
+        └── backport_comparison.py   # Ground-truth comparison vs. linux-stable.git
 ```
