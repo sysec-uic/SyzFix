@@ -30,9 +30,9 @@ pip install -r requirements.txt
 |---|---|
 | [**Reproducing without re-crawling**](docs/reproducing.md) | Use the pre-built HF dataset to start training in minutes |
 | [**Exploring the dataset**](docs/exploring.md) | Browse, search, and inspect individual bugs interactively |
-| [**Training guide**](docs/training.md) | SFT, DPO, prompt customisation, TRL examples |
 | [**Analysis**](docs/analysis.md) | Heuristic analyzers and the iteration timeline figure |
 | [**Memory system**](docs/memory.md) | RAG knowledge base for agent-based kernel bug fixing |
+| [**Training guide**](docs/training.md) | SFT, DPO, prompt customisation, TRL examples |
 | [**Data collection**](docs/collection.md) | Full crawl pipeline, rate limits, resuming, upload (**optional**) |
 
 ---
