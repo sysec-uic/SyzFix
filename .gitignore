@@ -18,6 +18,9 @@ env/
 # ── Analysis results (regenerable) ─────────────────────────
 analysis/results/
 
+# ── Memory system data (regenerable) ──────────────────────
+memory/data/
+
 # ── Dataset data (too large for git; use HuggingFace Hub) ──
 syzbot-dataset/data/raw/
 syzbot-dataset/data/processed/

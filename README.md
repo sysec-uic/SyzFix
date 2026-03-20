@@ -32,6 +32,7 @@ pip install -r requirements.txt
 | [**Exploring the dataset**](docs/exploring.md) | Browse, search, and inspect individual bugs interactively |
 | [**Training guide**](docs/training.md) | SFT, DPO, prompt customisation, TRL examples |
 | [**Analysis**](docs/analysis.md) | Heuristic analyzers and the iteration timeline figure |
+| [**Memory system**](docs/memory.md) | RAG knowledge base for agent-based kernel bug fixing |
 | [**Data collection**](docs/collection.md) | Full crawl pipeline, rate limits, resuming, upload (**optional**) |
 
 ---
@@ -92,7 +93,21 @@ SyzFix/
 │   ├── reproducing.md           # Use HF dataset without re-crawling
 │   ├── training.md              # Fine-tuning guide (SFT, DPO, TRL)
 │   ├── analysis.md              # Analysis scripts and plots
+│   ├── memory.md                # Memory system for agent-based bug fixing
 │   └── collection.md            # Full crawl pipeline reference
+├── memory/                      # RAG knowledge base for LLM agents
+│   ├── build.py                 # Extract & index all bug-fix knowledge
+│   ├── retrieve.py              # MemoryRetriever: similarity + structured search
+│   ├── schemas.py               # BugMemoryEntry, FixStrategy, ReviewLesson, …
+│   ├── embeddings.py            # BAAI/bge-base-en-v1.5 embedding wrapper
+│   ├── store.py                 # Persistence (JSONL, JSON, numpy, FAISS)
+│   └── data/                    # Generated artifacts (gitignored)
+│       ├── instance_memory.jsonl
+│       ├── pattern_memory.json
+│       ├── inverted_indices.json
+│       ├── faiss_crash.index
+│       └── export/pattern_knowledge.md
+├── test_memory_retrieval.py     # End-to-end retrieval demo & test
 ├── syzbot-dataset/              # Data collection & training-data pipeline
 │   ├── main.py                  # collect / export / stats / inspect
 │   ├── view.py                  # Interactive dataset explorer

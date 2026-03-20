@@ -16,3 +16,7 @@ huggingface_hub>=0.20.0
 pandas>=2.1.0
 matplotlib>=3.8.0
 numpy>=1.26.0
+
+# ── Memory system (memory/) ───────────────────────────────────────────────────
+sentence-transformers>=2.3.0
+faiss-cpu>=1.7.4
