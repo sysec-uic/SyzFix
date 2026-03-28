@@ -36,6 +36,14 @@ syzbot-dataset/data/*.db
 !syzbot-dataset/data/dataset/.gitkeep
 !syzbot-dataset/data/training/.gitkeep
 
+# ── Evaluation data (downloaded cases, results, build artifacts) ──
+evaluation/cases/
+evaluation/results/
+evaluation/kernel/
+evaluation/ccache/
+evaluation/rootfs/
+evaluation/workdir/
+
 # ── Editor / OS ───────────────────────────────────────────
 .DS_Store
 .idea/
