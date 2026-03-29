@@ -30,6 +30,7 @@ pip install -r requirements.txt
 |---|---|
 | [**Reproducing without re-crawling**](docs/reproducing.md) | Use the pre-built HF dataset to start training in minutes |
 | [**Exploring the dataset**](docs/exploring.md) | Browse, search, and inspect individual bugs interactively |
+| [**Evaluation**](docs/evaluation.md) | Reproduce crashes, generate fixes, and verify patches end-to-end |
 | [**Analysis**](docs/analysis.md) | Heuristic analyzers and the iteration timeline figure |
 | [**Memory system**](docs/memory.md) | RAG knowledge base for agent-based kernel bug fixing |
 | [**Training guide**](docs/training.md) | SFT, DPO, prompt customisation, TRL examples |
@@ -91,10 +92,36 @@ SyzFix/
 ├── requirements.txt             # All dependencies (crawler + analysis)
 ├── docs/                        # Extended documentation
 │   ├── reproducing.md           # Use HF dataset without re-crawling
+│   ├── exploring.md             # Browse and search bugs with the dataset viewer
+│   ├── evaluation.md            # Reproduce crashes and verify patches end-to-end
 │   ├── training.md              # Fine-tuning guide (SFT, DPO, TRL)
 │   ├── analysis.md              # Analysis scripts and plots
 │   ├── memory.md                # Memory system for agent-based bug fixing
 │   └── collection.md            # Full crawl pipeline reference
+├── evaluation/                  # End-to-end crash reproduction & fix evaluation
+│   ├── reproduce_crash.py       # Reproduce a crash; optionally verify a patch
+│   ├── generate_fix.py          # Generate a fix patch via a coding agent
+│   ├── run_eval.py              # Batch evaluation orchestrator (agent loop)
+│   ├── fetch_cases.py           # Fetch fresh test cases from live syzbot
+│   ├── agents/                  # Pluggable coding agent implementations
+│   │   ├── base.py              # Abstract CodingAgent + prompt builder
+│   │   ├── claude_code.py       # Claude Code CLI agent
+│   │   ├── opencode.py          # OpenCode CLI agent
+│   │   └── codex.py             # OpenAI Codex CLI agent
+│   ├── scripts/                 # Host-side shell scripts (build + QEMU)
+│   │   ├── setup_host.sh        # Install host dependencies (run once, as root)
+│   │   ├── create_rootfs.sh     # Build minimal busybox initramfs (run once)
+│   │   ├── reproduce.sh         # Build kernel, run reproducer in QEMU
+│   │   └── verify_fix.sh        # Apply patch, rebuild, confirm crash is gone
+│   ├── docker/                  # Docker-based execution environment (optional)
+│   │   ├── Dockerfile           # Ubuntu 24.04 + gcc/clang/qemu
+│   │   ├── reproduce.sh         # Docker counterpart of scripts/reproduce.sh
+│   │   └── verify_fix.sh        # Docker counterpart of scripts/verify_fix.sh
+│   ├── cases/                   # Per-bug test case directories (auto-created)
+│   │   └── <bug_id>/            # case.json, reproducer.c, kernel.config, …
+│   ├── results/                 # Agent-generated patches and evaluation results
+│   ├── kernel/                  # Cached Linux kernel source (bind-mounted)
+│   └── ccache/                  # Compiler cache (shared across runs)
 ├── memory/                      # RAG knowledge base for LLM agents
 │   ├── build.py                 # Extract & index all bug-fix knowledge
 │   ├── retrieve.py              # MemoryRetriever: similarity + structured search
@@ -117,6 +144,9 @@ SyzFix/
 │   ├── upload_hf.py             # Upload to HuggingFace Hub
 │   ├── restore_processed.py     # Download processed data from HF
 │   ├── retry_missing.py         # Retry failed fetches
+│   ├── data/
+│   │   ├── processed/           # Per-bug JSON files (~6,900 bugs, 11 GB)
+│   │   └── index.jsonl          # Lightweight fast-lookup index (~4 MB, auto-built)
 │   └── scraper/
 │       ├── syzbot.py            # syzbot JSON API + HTML
 │       ├── git_kernel.py        # git.kernel.org patch diffs
