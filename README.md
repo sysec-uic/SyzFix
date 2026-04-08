@@ -5,7 +5,10 @@ and assembles a structured dataset capturing the **full bug-fix lifecycle** — 
 report through patch iterations and reviewer discussions to the final merged commit.
 
 Intended for fine-tuning language models to generate and review kernel patches,
-and for researching patch evolution patterns in the Linux development process.
+for researching patch evolution patterns in the Linux development process,
+and for studying **cross-layer kernel bugs** — bugs where the crash occurs in one
+architectural layer but the fix belongs in another (e.g., a specific filesystem crash
+fixed in the VFS layer).
 
 > **Code:** https://github.com/sysec-uic/syzfix  
 > **Dataset:** https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset
@@ -31,7 +34,7 @@ pip install -r requirements.txt
 | [**Reproducing without re-crawling**](docs/reproducing.md) | Use the pre-built HF dataset to start training in minutes |
 | [**Exploring the dataset**](docs/exploring.md) | Browse, search, and inspect individual bugs interactively |
 | [**Evaluation**](docs/evaluation.md) | Reproduce crashes, generate fixes, and verify patches end-to-end |
-| [**Analysis**](docs/analysis.md) | Heuristic analyzers and the iteration timeline figure |
+| [**Analysis**](docs/analysis.md) | Heuristic analyzers, cross-layer analysis, and the iteration timeline figure |
 | [**Memory system**](docs/memory.md) | RAG knowledge base for agent-based kernel bug fixing |
 | [**Training guide**](docs/training.md) | SFT, DPO, prompt customisation, TRL examples |
 | [**Data collection**](docs/collection.md) | Full crawl pipeline, rate limits, resuming, upload (**optional**) |
@@ -154,7 +157,7 @@ SyzFix/
 │       ├── patchwork.py         # patchwork fallback
 │       └── stable_cherrypick.py # Extract cherry-pick map from linux-stable.git
 └── analysis/                    # Heuristic dataset analysis
-    ├── run_all.py               # Run all analyzers (13 total)
+    ├── run_all.py               # Run all analyzers (15 total)
     ├── plot_iteration_timeline.py  # Figure 1: patch iteration timeline
     ├── loader.py
     ├── filters.py
@@ -171,5 +174,38 @@ SyzFix/
         ├── insight_clusters.py
         ├── patch_evolution.py
         ├── backport_downstream.py   # Backport signals from discussion threads
-        └── backport_comparison.py   # Ground-truth comparison vs. linux-stable.git
+        ├── backport_comparison.py   # Ground-truth comparison vs. linux-stable.git
+        ├── kernel_layers.py         # Linux kernel layer taxonomy (7 domains)
+        └── cross_layer.py           # Cross-layer bug detection
 ```
+
+---
+
+## Cross-layer analysis
+
+Some kernel bugs crash in one architectural layer but need to be fixed in another.
+For example, a NULL pointer dereference in VFS core might actually require a fix in
+a specific filesystem like erofs, or a crash in a network protocol might need a fix
+in net core.
+
+The **cross-layer analyzer** classifies bugs across 7 kernel domains (filesystem,
+networking, block, device, mm, sound, graphics), each with hierarchical layers
+(core → framework → specific).
+
+```bash
+# Run the cross-layer analyzer
+python3 -m analysis.run_all --analyzer crosslayer
+
+# List only cross-layer bugs
+python3 syzbot-dataset/view.py list --cross-layer
+python3 syzbot-dataset/view.py list --cross-layer --cross-layer-domain filesystem
+
+# Inspect a specific bug's cross-layer classification
+python3 syzbot-dataset/view.py crosslayer <bug_id>
+
+# Generate training data for cross-layer classification
+cd syzbot-dataset && python3 prepare_training.py --tasks cross_layer
+```
+
+On the full dataset: **466 cross-layer bugs** (9.4%) identified, with filesystem (38%)
+and networking (53%) as the dominant domains.

@@ -38,6 +38,7 @@ from analysis.analyzers.insight_clusters import InsightClusterAnalyzer
 from analysis.analyzers.patch_evolution import PatchEvolutionAnalyzer
 from analysis.analyzers.backport_downstream import BackportDownstreamAnalyzer
 from analysis.analyzers.backport_comparison import BackportComparisonAnalyzer
+from analysis.analyzers.cross_layer import CrossLayerAnalyzer
 
 # ─── Registry of available analyzers ────────────────────────────────────────
 
@@ -56,6 +57,7 @@ ANALYZERS = {
     "evolution": PatchEvolutionAnalyzer(),
     "backport": BackportDownstreamAnalyzer(),
     "backport-gt": BackportComparisonAnalyzer(),
+    "crosslayer": CrossLayerAnalyzer(),
 }
 
 
