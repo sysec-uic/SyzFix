@@ -27,16 +27,39 @@ pip install -r requirements.txt
 
 ---
 
+## Quick Start
+
+```bash
+# Download and unpack the full per-bug JSON files (~2GB download, ~11GB unpacked)
+python -m syzbot-dataset.restore_processed --repo xiaoguangwang/syzfix-dataset
+
+# Build a lightweight index (~4 MB) instead of loading all 11 GB of processed data on every data viewer call
+python syzbot-dataset/view.py build-index
+
+# List all bugs — V=patch versions, P=has patch, R=has C reproducer, D=has discussion
+python syzbot-dataset/view.py list
+# Only bugs with a C reproducer (needed for crash reproduction)
+python syzbot-dataset/view.py list --has-reproducer
+
+# Run all analyzers (Heuristic analyzers)
+python -m analysis.run_all
+
+# Print previously saved results without re-running (instant)
+python -m analysis.run_all --show
+python -m analysis.run_all --show --analyzer revision
+```
+---
+
 ## Documentation
 
 | | |
 |---|---|
 | [**Reproducing without re-crawling**](docs/reproducing.md) | Use the pre-built HF dataset to start training in minutes |
 | [**Exploring the dataset**](docs/exploring.md) | Browse, search, and inspect individual bugs interactively |
-| [**Evaluation**](docs/evaluation.md) | Reproduce crashes, generate fixes, and verify patches end-to-end |
 | [**Analysis**](docs/analysis.md) | Heuristic analyzers, cross-layer analysis, and the iteration timeline figure |
 | [**Memory system**](docs/memory.md) | RAG knowledge base for agent-based kernel bug fixing |
-| [**Training guide**](docs/training.md) | SFT, DPO, prompt customisation, TRL examples |
+| [**Evaluation**](docs/evaluation.md) | Reproduce crashes, generate fixes, and verify patches end-to-end [TODO: untested] |
+| [**Training guide**](docs/training.md) | SFT, DPO, prompt customisation, TRL examples [TODO: untested] |
 | [**Data collection**](docs/collection.md) | Full crawl pipeline, rate limits, resuming, upload (**optional**) |
 
 ---
