@@ -32,16 +32,30 @@ class SubsystemDomain:
     def match(self, path: str) -> Optional[KernelLayer]:
         """Match a file path to a layer within this domain.
 
-        Checks from most specific (highest level) to most generic (level 0)
-        so that e.g. fs/ext4/super.c matches "ext4" before "VFS core".
+        Two-pass match to guarantee that explicit path_prefixes (at any
+        level) beat catch-all path_patterns. Without this, level-2 catch-all
+        regexes like ``^fs/[a-z]+/`` would pre-empt explicit level-0/1
+        prefixes like ``fs/iomap/`` or ``net/core/`` and silently relabel
+        framework/core files as "specific".
+
+        Within each pass, layers are still ordered by -level so that
+        the most specific explicit prefix (e.g. fs/ext4/) wins over a
+        less specific one if both could match.
         """
-        for layer in sorted(self.layers, key=lambda l: -l.level):
+        ordered = sorted(self.layers, key=lambda l: -l.level)
+
+        # Pass 1: explicit prefixes — most-specific-first.
+        for layer in ordered:
             for prefix in layer.path_prefixes:
                 if path.startswith(prefix) or path == prefix:
                     return layer
+
+        # Pass 2: catch-all patterns — most-specific-first.
+        for layer in ordered:
             for pat in layer.path_patterns:
                 if pat.search(path):
                     return layer
+
         return None
 
 

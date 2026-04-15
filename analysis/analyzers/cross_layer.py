@@ -51,6 +51,15 @@ def compute_cross_layer(
     if not crash_files:
         return None
 
+    # Determine stack overlap: does any fix file appear in the crash stack?
+    crash_file_set = set(crash_files)
+    fix_on_stack = [f for f in fix_files if f in crash_file_set]
+    fix_off_stack = [f for f in fix_files if f not in crash_file_set]
+    if fix_on_stack:
+        stack_overlap = "fix_on_stack"
+    else:
+        stack_overlap = "fix_off_stack"
+
     # Classify all files by domain.
     # For crash files, preserve stack order (top = crash site) so we can
     # determine which layer the bug actually manifests in.
@@ -74,6 +83,9 @@ def compute_cross_layer(
         return {
             "is_cross_layer": False,
             "reason": "no_shared_domain",
+            "stack_overlap": stack_overlap,
+            "fix_on_stack_files": fix_on_stack,
+            "fix_off_stack_files": fix_off_stack,
             "crash_files": crash_files[:5],
             "fix_files": fix_files,
             "crash_domains": sorted(crash_by_domain.keys()),
@@ -141,6 +153,9 @@ def compute_cross_layer(
         return {
             "is_cross_layer": False,
             "reason": "same_layer",
+            "stack_overlap": stack_overlap,
+            "fix_on_stack_files": fix_on_stack,
+            "fix_off_stack_files": fix_off_stack,
             "crash_files": crash_files[:5],
             "fix_files": fix_files,
             "shared_domains": sorted(shared_domains),
@@ -157,6 +172,9 @@ def compute_cross_layer(
         "fix_layer": primary["fix_layer"],
         "fix_layer_level": primary["fix_layer_level"],
         "direction": primary["direction"],
+        "stack_overlap": stack_overlap,
+        "fix_on_stack_files": fix_on_stack,
+        "fix_off_stack_files": fix_off_stack,
         "all_findings": cross_layer_findings,
         "crash_files": crash_files[:5],
         "fix_files": fix_files,
@@ -175,6 +193,7 @@ class CrossLayerAnalyzer(BaseAnalyzer):
         domain_counter = Counter()
         direction_counter = Counter()
         domain_direction = Counter()  # (domain, direction) pairs
+        stack_overlap_counter = Counter()  # fix_on_stack vs fix_off_stack
         cross_layer_examples: dict[str, list] = defaultdict(list)
 
         analyzed = 0
@@ -200,10 +219,17 @@ class CrossLayerAnalyzer(BaseAnalyzer):
             if not result["is_cross_layer"]:
                 if result.get("reason") == "no_shared_domain":
                     no_shared_domain += 1
+                # Still record file-level info so downstream consumers
+                # (e.g. the crash_to_patch_location training task) can
+                # use same-layer / cross-subsystem bugs as supervision.
                 details.append({
                     "bug_id": bug.bug_id,
                     "title": bug.title,
                     "is_cross_layer": False,
+                    "reason": result.get("reason", ""),
+                    "stack_overlap": result.get("stack_overlap", ""),
+                    "fix_on_stack_files": result.get("fix_on_stack_files", []),
+                    "fix_off_stack_files": result.get("fix_off_stack_files", []),
                 })
                 continue
 
@@ -215,6 +241,9 @@ class CrossLayerAnalyzer(BaseAnalyzer):
             direction_counter[direction] += 1
             domain_direction[(domain, direction)] += 1
 
+            overlap = result.get("stack_overlap", "unknown")
+            stack_overlap_counter[overlap] += 1
+
             detail = {
                 "bug_id": bug.bug_id,
                 "title": bug.title,
@@ -223,6 +252,9 @@ class CrossLayerAnalyzer(BaseAnalyzer):
                 "crash_layer": result["crash_layer"],
                 "fix_layer": result["fix_layer"],
                 "direction": direction,
+                "stack_overlap": overlap,
+                "fix_on_stack_files": result.get("fix_on_stack_files", []),
+                "fix_off_stack_files": result.get("fix_off_stack_files", []),
             }
             details.append(detail)
 
@@ -257,6 +289,16 @@ class CrossLayerAnalyzer(BaseAnalyzer):
         for direction in ["fix_in_upper_layer", "fix_in_lower_layer"]:
             count = direction_counter.get(direction, 0)
             summary[f"  {direction}"] = (
+                f"{count} ({count / max(cross_layer_count, 1) * 100:.1f}%)"
+            )
+
+        # Stack overlap breakdown
+        summary["----"] = "--- Stack Overlap ---"
+        for overlap in ["fix_on_stack", "fix_off_stack"]:
+            count = stack_overlap_counter.get(overlap, 0)
+            label = "Fix ON crash stack (stack-reachable)" if overlap == "fix_on_stack" \
+                else "Fix OFF crash stack (true cross-layer)"
+            summary[f"  {label}"] = (
                 f"{count} ({count / max(cross_layer_count, 1) * 100:.1f}%)"
             )
 
