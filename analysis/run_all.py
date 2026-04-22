@@ -104,7 +104,7 @@ def save_results(result: AnalysisResult, output_dir: Path):
         json.dump({
             "name": result.name,
             "summary": result.summary,
-            "details": result.details[:100],  # cap details for JSON size
+            "details": result.details,  # save all details for downstream use
             "tables": {
                 k: v for k, v in result.tables.items()
                 if isinstance(v, list)  # only save list tables as JSON

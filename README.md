@@ -56,7 +56,8 @@ python -m analysis.run_all --show --analyzer revision
 |---|---|
 | [**Reproducing without re-crawling**](docs/reproducing.md) | Use the pre-built HF dataset to start training in minutes |
 | [**Exploring the dataset**](docs/exploring.md) | Browse, search, and inspect individual bugs interactively |
-| [**Analysis**](docs/analysis.md) | Heuristic analyzers, cross-layer analysis, and the iteration timeline figure |
+| [**Analysis**](docs/analysis.md) | Heuristic analyzers and the iteration timeline figure |
+| [**Cross-layer analysis**](docs/cross_layer.md) | Cross-layer bugs, stack-overlap verification, kernel layer taxonomy |
 | [**Memory system**](docs/memory.md) | RAG knowledge base for agent-based kernel bug fixing |
 | [**Evaluation**](docs/evaluation.md) | Reproduce crashes, generate fixes, and verify patches end-to-end [TODO: untested] |
 | [**Training guide**](docs/training.md) | SFT, DPO, prompt customisation, TRL examples [TODO: untested] |
@@ -207,28 +208,15 @@ SyzFix/
 ## Cross-layer analysis
 
 Some kernel bugs crash in one architectural layer but need to be fixed in another.
-For example, a NULL pointer dereference in VFS core might actually require a fix in
-a specific filesystem like erofs, or a crash in a network protocol might need a fix
-in net core.
-
-The **cross-layer analyzer** classifies bugs across 7 kernel domains (filesystem,
-networking, block, device, mm, sound, graphics), each with hierarchical layers
-(core → framework → specific).
+Of 4,983 analyzed bugs, **466 (9.4%) are cross-layer** — and of those,
+**130 (27.9%) have the fix completely off the crash stack**, making them the
+hardest cases for LLM-based bug localization.
 
 ```bash
-# Run the cross-layer analyzer
-python3 -m analysis.run_all --analyzer crosslayer
-
-# List only cross-layer bugs
-python3 syzbot-dataset/view.py list --cross-layer
-python3 syzbot-dataset/view.py list --cross-layer --cross-layer-domain filesystem
-
-# Inspect a specific bug's cross-layer classification
-python3 syzbot-dataset/view.py crosslayer <bug_id>
-
-# Generate training data for cross-layer classification
-cd syzbot-dataset && python3 prepare_training.py --tasks cross_layer
+python3 syzbot-dataset/view.py stats                    # full breakdown
+python3 syzbot-dataset/view.py list --true-cross-layer   # the 130 hardest cases
+python3 syzbot-dataset/view.py crosslayer <bug_id>       # per-bug analysis
 ```
 
-On the full dataset: **466 cross-layer bugs** (9.4%) identified, with filesystem (38%)
-and networking (53%) as the dominant domains.
+→ **[Full documentation](docs/cross_layer.md)**: dataset breakdown, stack-overlap
+verification, kernel layer taxonomy, examples, and all commands.
