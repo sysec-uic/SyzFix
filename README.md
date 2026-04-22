@@ -31,15 +31,15 @@ pip install -r requirements.txt
 
 ```bash
 # Download and unpack the full per-bug JSON files (~2GB download, ~11GB unpacked)
-python -m syzbot-dataset.restore_processed --repo xiaoguangwang/syzfix-dataset
+python -m dataset.restore_processed --repo xiaoguangwang/syzfix-dataset
 
 # Build a lightweight index (~4 MB) instead of loading all 11 GB of processed data on every data viewer call
-python syzbot-dataset/view.py build-index
+python -m dataset.view build-index
 
 # List all bugs — V=patch versions, P=has patch, R=has C reproducer, D=has discussion
-python syzbot-dataset/view.py list
+python -m dataset.view list
 # Only bugs with a C reproducer (needed for crash reproduction)
-python syzbot-dataset/view.py list --has-reproducer
+python -m dataset.view list --has-reproducer
 
 # Run all analyzers (Heuristic analyzers)
 python -m analysis.run_all
@@ -114,94 +114,57 @@ mailing-list discussions. Up to 9 patch versions captured per bug.
 
 ## Project structure
 
+The repository is split into a stable **dataset core**, shared **infrastructure**
+packages (consumed by every paper), and **projects/** — one subdirectory per
+research paper.
+
 ```
 SyzFix/
-├── requirements.txt             # All dependencies (crawler + analysis)
-├── docs/                        # Extended documentation
-│   ├── reproducing.md           # Use HF dataset without re-crawling
-│   ├── exploring.md             # Browse and search bugs with the dataset viewer
-│   ├── evaluation.md            # Reproduce crashes and verify patches end-to-end
-│   ├── training.md              # Fine-tuning guide (SFT, DPO, TRL)
-│   ├── analysis.md              # Analysis scripts and plots
-│   ├── memory.md                # Memory system for agent-based bug fixing
-│   └── collection.md            # Full crawl pipeline reference
-├── evaluation/                  # End-to-end crash reproduction & fix evaluation
-│   ├── reproduce_crash.py       # Reproduce a crash; optionally verify a patch
-│   ├── generate_fix.py          # Generate a fix patch via a coding agent
-│   ├── run_eval.py              # Batch evaluation orchestrator (agent loop)
-│   ├── fetch_cases.py           # Fetch fresh test cases from live syzbot
-│   ├── agents/                  # Pluggable coding agent implementations
-│   │   ├── base.py              # Abstract CodingAgent + prompt builder
-│   │   ├── claude_code.py       # Claude Code CLI agent
-│   │   ├── opencode.py          # OpenCode CLI agent
-│   │   └── codex.py             # OpenAI Codex CLI agent
-│   ├── scripts/                 # Host-side shell scripts (build + QEMU)
-│   │   ├── setup_host.sh        # Install host dependencies (run once, as root)
-│   │   ├── create_rootfs.sh     # Build minimal busybox initramfs (run once)
-│   │   ├── reproduce.sh         # Build kernel, run reproducer in QEMU
-│   │   └── verify_fix.sh        # Apply patch, rebuild, confirm crash is gone
-│   ├── docker/                  # Docker-based execution environment (optional)
-│   │   ├── Dockerfile           # Ubuntu 24.04 + gcc/clang/qemu
-│   │   ├── reproduce.sh         # Docker counterpart of scripts/reproduce.sh
-│   │   └── verify_fix.sh        # Docker counterpart of scripts/verify_fix.sh
-│   ├── cases/                   # Per-bug test case directories (auto-created)
-│   │   └── <bug_id>/            # case.json, reproducer.c, kernel.config, …
-│   ├── results/                 # Agent-generated patches and evaluation results
-│   ├── kernel/                  # Cached Linux kernel source (bind-mounted)
-│   └── ccache/                  # Compiler cache (shared across runs)
-├── memory/                      # RAG knowledge base for LLM agents
-│   ├── build.py                 # Extract & index all bug-fix knowledge
-│   ├── retrieve.py              # MemoryRetriever: similarity + structured search
-│   ├── schemas.py               # BugMemoryEntry, FixStrategy, ReviewLesson, …
-│   ├── embeddings.py            # BAAI/bge-base-en-v1.5 embedding wrapper
-│   ├── store.py                 # Persistence (JSONL, JSON, numpy, FAISS)
-│   └── data/                    # Generated artifacts (gitignored)
-│       ├── instance_memory.jsonl
-│       ├── pattern_memory.json
-│       ├── inverted_indices.json
-│       ├── faiss_crash.index
-│       └── export/pattern_knowledge.md
-├── test_memory_retrieval.py     # End-to-end retrieval demo & test
-├── syzbot-dataset/              # Data collection & training-data pipeline
-│   ├── main.py                  # collect / export / stats / inspect
-│   ├── view.py                  # Interactive dataset explorer
-│   ├── pipeline.py              # Orchestrates all scrapers
-│   ├── prepare_training.py      # Processed data → training JSONL
-│   ├── training_config.py       # Prompt templates and task definitions
-│   ├── upload_hf.py             # Upload to HuggingFace Hub
-│   ├── restore_processed.py     # Download processed data from HF
-│   ├── retry_missing.py         # Retry failed fetches
-│   ├── data/
-│   │   ├── processed/           # Per-bug JSON files (~6,900 bugs, 11 GB)
-│   │   └── index.jsonl          # Lightweight fast-lookup index (~4 MB, auto-built)
-│   └── scraper/
-│       ├── syzbot.py            # syzbot JSON API + HTML
-│       ├── git_kernel.py        # git.kernel.org patch diffs
-│       ├── lore.py              # lore.kernel.org mbox threads
-│       ├── patchwork.py         # patchwork fallback
-│       └── stable_cherrypick.py # Extract cherry-pick map from linux-stable.git
-└── analysis/                    # Heuristic dataset analysis
-    ├── run_all.py               # Run all analyzers (15 total)
-    ├── plot_iteration_timeline.py  # Figure 1: patch iteration timeline
-    ├── loader.py
-    ├── filters.py
-    └── analyzers/
-        ├── revision_reasons.py
-        ├── discussion_lessons.py
-        ├── non_functional.py
-        ├── patch_diff_analysis.py
-        ├── fix_patterns.py
-        ├── fix_locality.py
-        ├── difficulty_stratification.py
-        ├── information_sufficiency.py
-        ├── case_study_finder.py
-        ├── insight_clusters.py
-        ├── patch_evolution.py
-        ├── backport_downstream.py   # Backport signals from discussion threads
-        ├── backport_comparison.py   # Ground-truth comparison vs. linux-stable.git
-        ├── kernel_layers.py         # Linux kernel layer taxonomy (7 domains)
-        └── cross_layer.py           # Cross-layer bug detection
+├── requirements.txt          # All dependencies (crawler + analysis + memory)
+├── docs/                     # Extended documentation (see table above)
+├── dataset/                  # Dataset collection, storage, viewer, HF upload
+│   ├── main.py               # collect / export / stats / inspect
+│   ├── view.py               # Interactive dataset explorer
+│   ├── pipeline.py           # Orchestrates all scrapers
+│   ├── upload_hf.py          # Upload to HuggingFace Hub
+│   ├── restore_processed.py  # Download processed data from HF
+│   ├── retry_missing.py      # Retry failed fetches
+│   ├── data/                 # (gitignored) processed/, raw/, training/, index.jsonl
+│   └── scraper/              # syzbot.py, git_kernel.py, lore.py, patchwork.py, stable_cherrypick.py
+├── analysis/                 # Heuristic dataset analysis (shared)
+│   ├── run_all.py            # Run all analyzers
+│   ├── plot_iteration_timeline.py
+│   ├── loader.py, filters.py
+│   └── analyzers/            # revision_reasons, bug_type, fix_pattern, kernel_layers, cross_layer, …
+├── memory/                   # RAG knowledge base for LLM agents (shared)
+│   ├── build.py, retrieve.py, schemas.py, embeddings.py, store.py
+│   ├── knowledge/            # Git-tracked distilled rules and pattern knowledge
+│   └── data/                 # (gitignored) FAISS indices, instance memory, embeddings
+├── evaluation/               # Crash reproduction + agent-fix pipeline (shared)
+│   ├── reproduce_crash.py, generate_fix.py, run_eval.py, fetch_cases.py
+│   ├── agents/               # claude_code, opencode, codex adapters
+│   ├── scripts/, docker/     # Host & container build scripts
+│   └── cases/, kernel/, ccache/, results/   # (gitignored) build + run artifacts
+├── training/                 # Training-data prep + fine-tuning (shared)
+│   ├── prepare_training.py   # Processed data → training JSONL (5 tasks + crash_to_patch_location)
+│   ├── training_config.py    # Prompt templates and task definitions
+│   ├── train_patch_location.py, eval_patch_location.py
+├── projects/                 # One subdirectory per research paper
+│   ├── cross-layer/          # Cross-layer bug analysis + patch-location paper
+│   └── patch-evolution/      # SyzFix dataset + memory-augmented fixing paper
+└── tests/
+    └── test_memory_retrieval.py   # End-to-end retrieval demo & test
 ```
+
+## Research projects
+
+| Project | Topic |
+|---|---|
+| [`projects/cross-layer/`](projects/cross-layer/) | Cross-layer bugs: taxonomy, patch-location prediction |
+| [`projects/patch-evolution/`](projects/patch-evolution/) | Dataset overview + memory-augmented bug-fix lifecycle |
+
+Shared code lives at the repo root; each project's `README.md` lists which
+shared packages it consumes.
 
 ---
 
@@ -213,9 +176,9 @@ Of 4,983 analyzed bugs, **466 (9.4%) are cross-layer** — and of those,
 hardest cases for LLM-based bug localization.
 
 ```bash
-python3 syzbot-dataset/view.py stats                    # full breakdown
-python3 syzbot-dataset/view.py list --true-cross-layer   # the 130 hardest cases
-python3 syzbot-dataset/view.py crosslayer <bug_id>       # per-bug analysis
+python -m dataset.view stats                    # full breakdown
+python -m dataset.view list --true-cross-layer   # the 130 hardest cases
+python -m dataset.view crosslayer <bug_id>       # per-bug analysis
 ```
 
 → **[Full documentation](docs/cross_layer.md)**: dataset breakdown, stack-overlap

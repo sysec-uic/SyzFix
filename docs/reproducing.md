@@ -45,13 +45,13 @@ Do this to change prompt templates, add new tasks, or filter bugs differently.
 
 ```bash
 # Download and unpack the full per-bug JSON files
-python -m syzbot-dataset.restore_processed --repo xiaoguangwang/syzfix-dataset
+python -m dataset.restore_processed --repo xiaoguangwang/syzfix-dataset
 
 # Regenerate all training tasks
-python -m syzbot-dataset.prepare_training --tasks all
+python -m training.prepare_training --tasks all
 
 # Or a specific task
-python -m syzbot-dataset.prepare_training --tasks bug_to_patch
+python -m training.prepare_training --tasks bug_to_patch
 ```
 
 `restore_processed` streams the file line-by-line — constant RAM usage.

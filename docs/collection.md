@@ -16,21 +16,21 @@ pip install -r requirements.txt
 
 ```bash
 # Smoke test (10 bugs)
-python -m syzbot-dataset.main collect --limit 10
+python -m dataset.main collect --limit 10
 
 # Full collection (~7 000 bugs, 8–10 hours)
-python -m syzbot-dataset.main collect
+python -m dataset.main collect
 
 # Faster: skip patchwork fallback
-python -m syzbot-dataset.main collect --skip-patchwork
+python -m dataset.main collect --skip-patchwork
 ```
 
-Progress is saved to `syzbot-dataset/data/progress.db` (SQLite) — simply re-run to resume.
+Progress is saved to `dataset/data/progress.db` (SQLite) — simply re-run to resume.
 
 ## Monitor
 
 ```bash
-python -m syzbot-dataset.main stats
+python -m dataset.main stats
 ```
 
 ```
@@ -55,16 +55,16 @@ See **[exploring.md](exploring.md)** for the full reference.
 ## Retry failures
 
 ```bash
-python -m syzbot-dataset.retry_missing stats
-python -m syzbot-dataset.retry_missing patches
-python -m syzbot-dataset.retry_missing patches --limit 100
+python -m dataset.retry_missing stats
+python -m dataset.retry_missing patches
+python -m dataset.retry_missing patches --limit 100
 ```
 
 ## Export
 
 ```bash
-python -m syzbot-dataset.main export --format jsonl
-python -m syzbot-dataset.main export --format huggingface
+python -m dataset.main export --format jsonl
+python -m dataset.main export --format huggingface
 ```
 
 ## Upload to HuggingFace
@@ -73,16 +73,16 @@ python -m syzbot-dataset.main export --format huggingface
 hf auth login
 
 # Flat structured export (research / analysis)
-python -m syzbot-dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset
+python -m dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset
 
 # Training-format JSONL (5 task configs, ~210 MB, streamed)
-python -m syzbot-dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset --training
+python -m dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset --training
 
 # Full processed data for collaborators (~2 GB)
-python -m syzbot-dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset --processed
+python -m dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset --processed
 
 # Dry run
-python -m syzbot-dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset --training --dry-run
+python -m dataset.upload_hf --repo YOUR_USERNAME/syzfix-dataset --training --dry-run
 ```
 
 ## Rate limits

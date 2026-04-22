@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart LR
-    subgraph Collect ["1. Collect (syzbot-dataset/)"]
+    subgraph Collect ["1. Collect (dataset/)"]
         SYZ[syzbot API] --> PIPE[pipeline.py]
         GIT[git.kernel.org] --> PIPE
         LORE[lore.kernel.org] --> PIPE
@@ -214,7 +214,7 @@ graph TB
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Stage 1: Data Collection (`syzbot-dataset/`)
+## Stage 1: Data Collection (`dataset/`)
 
 Async multi-source crawler that builds the raw dataset.
 
@@ -412,7 +412,7 @@ Three-layer knowledge architecture built from the training split.
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Stage 4: Training Data (`syzbot-dataset/prepare_training.py`)
+## Stage 4: Training Data (`training/prepare_training.py`)
 
 Five task-specific datasets for fine-tuning.
 
@@ -527,9 +527,9 @@ How the memory system serves an LLM agent at inference time.
 SyzFix/
 ├── README.md
 ├── requirements.txt
-├── test_memory_retrieval.py
+├── tests/test_memory_retrieval.py
 │
-├── syzbot-dataset/                # Stage 1: Collection
+├── dataset/                # Stage 1: Collection
 │   ├── main.py                    #   CLI: collect, export, stats
 │   ├── pipeline.py                #   Orchestrator
 │   ├── models.py                  #   Data models
@@ -541,14 +541,13 @@ SyzFix/
 │   │   ├── patchwork.py           #     patchwork.kernel.org fallback
 │   │   └── stable_cherrypick.py   #     linux-stable cherry-picks
 │   ├── export.py                  #   JSONL export
-│   ├── prepare_training.py        #   SFT/DPO training data
 │   ├── upload_hf.py               #   HuggingFace upload
 │   ├── view.py                    #   Interactive explorer
 │   └── data/                      #   All collected data (not in git)
 │       ├── raw/
 │       ├── processed/             #   ~6,900 bug JSONs
 │       ├── dataset/               #   JSONL export
-│       └── training/              #   Task-specific JSONL
+│       └── training/              #   Task-specific JSONL (written by training.prepare_training)
 │
 ├── analysis/                      # Stage 2: Analysis
 │   ├── run_all.py                 #   CLI: run analyzers
@@ -602,8 +601,18 @@ SyzFix/
 │   ├── memory.md                  #   Memory system guide
 │   └── exploring.md               #   Dataset explorer guide
 │
-└── paper/                         # Research paper
-    ├── main.tex
-    ├── main.pdf
-    └── Makefile
+├── training/                      # Training-data prep + fine-tuning
+│   ├── prepare_training.py        #   SFT/DPO training data
+│   ├── training_config.py         #   Prompts and task definitions
+│   ├── train_patch_location.py
+│   └── eval_patch_location.py
+│
+└── projects/                      # Research papers (one per subdir)
+    ├── cross-layer/
+    │   ├── main.tex
+    │   └── main.pdf
+    └── patch-evolution/
+        ├── main.tex
+        ├── main.pdf
+        └── Makefile
 ```

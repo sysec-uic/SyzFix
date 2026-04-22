@@ -1,7 +1,7 @@
 # Exploring the Dataset
 
 All commands are run from the **project root** (`syzfix/`).
-Requires Option B from [reproducing.md](reproducing.md) — the processed data must be present locally in `syzbot-dataset/data/processed/`.
+Requires Option B from [reproducing.md](reproducing.md) — the processed data must be present locally in `dataset/data/processed/`.
 
 ## First-time setup: build the index
 
@@ -9,9 +9,9 @@ Requires Option B from [reproducing.md](reproducing.md) — the processed data m
 of processed data on every call.  Build it once after restoring or collecting data:
 
 ```bash
-python syzbot-dataset/view.py build-index
+python -m dataset.view build-index
 # → Building index from 6947 bug files...
-# → Index written to syzbot-dataset/data/index.jsonl (6947 bugs)
+# → Index written to dataset/data/index.jsonl (6947 bugs)
 # → Done: 6947 bugs indexed in 48s (4071KB)
 ```
 
@@ -23,24 +23,24 @@ Re-run this command whenever new bugs are collected to keep the index current.
 
 ```bash
 # List all bugs — V=patch versions, P=has patch, R=has C reproducer, D=has discussion
-python syzbot-dataset/view.py list
+python -m dataset.view list
 
 # Only bugs with a C reproducer (needed for crash reproduction)
-python syzbot-dataset/view.py list --has-reproducer
-python syzbot-dataset/view.py list -r                     # short flag
+python -m dataset.view list --has-reproducer
+python -m dataset.view list -r                     # short flag
 
 # Only bugs with patch iteration history (v1 → v2+)
-python syzbot-dataset/view.py list --has-evolution
+python -m dataset.view list --has-evolution
 
 # Filter by keyword in title
-python syzbot-dataset/view.py list --subsystem net -n 20
-python syzbot-dataset/view.py list --subsystem fs
+python -m dataset.view list --subsystem net -n 20
+python -m dataset.view list --subsystem fs
 
 # Combine filters
-python syzbot-dataset/view.py list --has-reproducer --has-evolution --subsystem net
+python -m dataset.view list --has-reproducer --has-evolution --subsystem net
 
 # Force a rebuild of the index before listing
-python syzbot-dataset/view.py list --rebuild-index
+python -m dataset.view list --rebuild-index
 ```
 
 ---
@@ -49,15 +49,15 @@ python syzbot-dataset/view.py list --rebuild-index
 
 ```bash
 # Full lifecycle: crash → patches → discussion → fix commit
-python syzbot-dataset/view.py show <bug_id>
+python -m dataset.view show <bug_id>
 
 # Individual sections
-python syzbot-dataset/view.py crash   <bug_id>              # kernel crash report + C reproducer
-python syzbot-dataset/view.py patch   <bug_id>              # final merged patch
-python syzbot-dataset/view.py patch   <bug_id> --version 1  # specific patch version
-python syzbot-dataset/view.py discuss <bug_id>              # full email review thread
-python syzbot-dataset/view.py discuss <bug_id> -v 2         # only v2 discussion
-python syzbot-dataset/view.py diff    <bug_id>              # v1 → v2 → … side-by-side diff
+python -m dataset.view crash   <bug_id>              # kernel crash report + C reproducer
+python -m dataset.view patch   <bug_id>              # final merged patch
+python -m dataset.view patch   <bug_id> --version 1  # specific patch version
+python -m dataset.view discuss <bug_id>              # full email review thread
+python -m dataset.view discuss <bug_id> -v 2         # only v2 discussion
+python -m dataset.view diff    <bug_id>              # v1 → v2 → … side-by-side diff
 ```
 
 ---
@@ -66,18 +66,18 @@ python syzbot-dataset/view.py diff    <bug_id>              # v1 → v2 → … 
 
 ```bash
 # Fast search across titles and crash report summaries (uses index, <0.1s)
-python syzbot-dataset/view.py search "use-after-free"
-python syzbot-dataset/view.py search "null pointer"
+python -m dataset.view search "use-after-free"
+python -m dataset.view search "null pointer"
 
 # Restrict to bugs with a C reproducer
-python syzbot-dataset/view.py search "use-after-free" --has-reproducer
-python syzbot-dataset/view.py search "use-after-free" -r
+python -m dataset.view search "use-after-free" --has-reproducer
+python -m dataset.view search "use-after-free" -r
 
 # Deep search: scan full crash reports (slow — loads all files)
-python syzbot-dataset/view.py search "filemap_read_folio" --deep
+python -m dataset.view search "filemap_read_folio" --deep
 
 # Jump to a random bug
-python syzbot-dataset/view.py random
+python -m dataset.view random
 ```
 
 > **Fast vs deep search:** the default fast search matches against the bug title
@@ -90,16 +90,16 @@ python syzbot-dataset/view.py random
 
 ```bash
 # Find reproducible UAF bugs with patch evolution in networking
-python syzbot-dataset/view.py list --has-reproducer --has-evolution --subsystem net -n 10
+python -m dataset.view list --has-reproducer --has-evolution --subsystem net -n 10
 
 # Pick a bug_id from the output, e.g. ea1cd4aa4d1e98458a55
-python syzbot-dataset/view.py show ea1cd4aa4d1e98458a55
+python -m dataset.view show ea1cd4aa4d1e98458a55
 
 # Inspect the v1 → v2 diff to see what reviewers changed
-python syzbot-dataset/view.py diff ea1cd4aa4d1e98458a55
+python -m dataset.view diff ea1cd4aa4d1e98458a55
 
 # Read the review thread that drove the revision
-python syzbot-dataset/view.py discuss ea1cd4aa4d1e98458a55 -v 1
+python -m dataset.view discuss ea1cd4aa4d1e98458a55 -v 1
 
 # Reproduce the crash (see evaluation.md)
 python evaluation/reproduce_crash.py ea1cd4aa4d1e98458a55

@@ -247,16 +247,16 @@ You need a bare clone of `linux-stable.git` (~6 GB) and the extracted cherry-pic
 # 1. Clone linux-stable (one-time, ~6 GB)
 git clone --bare \
     git://git.kernel.org/pub/scm/linux/kernel/git/stable/linux-stable.git \
-    syzbot-dataset/data/raw/linux-stable.git
+    dataset/data/raw/linux-stable.git
 
 # 2. Extract cherry-pick mappings (~5–15 min)
-python -m syzbot-dataset.scraper.stable_cherrypick
+python -m dataset.scraper.stable_cherrypick
 
 # 3. Run the analyzer
 python -m analysis.run_all --analyzer backport-gt
 ```
 
-The extraction produces `syzbot-dataset/data/processed/cherrypick_map.json` (~52 MB),
+The extraction produces `dataset/data/processed/cherrypick_map.json` (~52 MB),
 containing 324,968 cherry-picks across 81 stable branches.  Once extracted, the
 analyzer runs in seconds.
 
@@ -267,7 +267,7 @@ python -m analysis.run_all --show --analyzer backport-gt
 
 #### How the cherry-pick extractor works
 
-`syzbot-dataset/scraper/stable_cherrypick.py` walks every `linux-X.Y.y` branch in the
+`dataset/scraper/stable_cherrypick.py` walks every `linux-X.Y.y` branch in the
 bare repo and parses two upstream-reference patterns from commit bodies:
 
 | Pattern | Example | Used by |

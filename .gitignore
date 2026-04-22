@@ -22,19 +22,19 @@ analysis/results/
 memory/data/
 
 # ── Dataset data (too large for git; use HuggingFace Hub) ──
-syzbot-dataset/data/raw/
-syzbot-dataset/data/processed/
-syzbot-dataset/data/dataset/
-syzbot-dataset/data/training/
-syzbot-dataset/data/*.log
-syzbot-dataset/data/*.db
+dataset/data/raw/
+dataset/data/processed/
+dataset/data/dataset/
+dataset/data/training/
+dataset/data/*.log
+dataset/data/*.db
 
 # ── Keep the data directory structure (not its contents) ──
-!syzbot-dataset/data/.gitkeep
-!syzbot-dataset/data/raw/.gitkeep
-!syzbot-dataset/data/processed/.gitkeep
-!syzbot-dataset/data/dataset/.gitkeep
-!syzbot-dataset/data/training/.gitkeep
+!dataset/data/.gitkeep
+!dataset/data/raw/.gitkeep
+!dataset/data/processed/.gitkeep
+!dataset/data/dataset/.gitkeep
+!dataset/data/training/.gitkeep
 
 # ── Evaluation data (downloaded cases, results, build artifacts) ──
 evaluation/cases/

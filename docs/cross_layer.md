@@ -91,23 +91,23 @@ See [`analysis/analyzers/kernel_layers.py`](../analysis/analyzers/kernel_layers.
 python3 -m analysis.run_all --analyzer crosslayer
 
 # Quick overview of all statistics
-python3 syzbot-dataset/view.py stats
+python -m dataset.view stats
 
 # List all 466 cross-layer bugs
-python3 syzbot-dataset/view.py list --cross-layer
+python -m dataset.view list --cross-layer
 
 # List cross-layer bugs with on/off-stack status
-python3 syzbot-dataset/view.py list --cross-layer --verify-stack
+python -m dataset.view list --cross-layer --verify-stack
 
 # List only the 130 hardest cases (fix NOT on crash stack)
-python3 syzbot-dataset/view.py list --true-cross-layer
+python -m dataset.view list --true-cross-layer
 
 # Filter by domain
-python3 syzbot-dataset/view.py list --cross-layer --cross-layer-domain filesystem
+python -m dataset.view list --cross-layer --cross-layer-domain filesystem
 
 # Inspect a specific bug's cross-layer + stack-overlap classification
-python3 syzbot-dataset/view.py crosslayer <bug_id>
+python -m dataset.view crosslayer <bug_id>
 
 # Generate training data for cross-layer classification
-cd syzbot-dataset && python3 prepare_training.py --tasks cross_layer
+cd dataset && python3 prepare_training.py --tasks cross_layer
 ```
