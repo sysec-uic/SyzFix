@@ -21,11 +21,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
-# ── make sure the syzbot-dataset package is importable ────────────────────────
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "syzbot-dataset"))
-
-from storage import DataStore, ProgressDB  # noqa: E402
+from dataset.storage import DataStore, ProgressDB  # noqa: E402
 
 
 # ── timestamp helpers ──────────────────────────────────────────────────────────

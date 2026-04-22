@@ -1,7 +1,7 @@
 """
 Shared data loading and filtering for the SyzFix dataset.
 
-Loads processed JSON files from syzbot-dataset/data/processed/ and provides
+Loads processed JSON files from dataset/data/processed/ and provides
 convenient iterators and accessors for analysis modules.
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 # Path to the processed data directory
-DATA_DIR = Path(__file__).resolve().parent.parent / "syzbot-dataset" / "data" / "processed"
+DATA_DIR = Path(__file__).resolve().parent.parent / "dataset" / "data" / "processed"
 
 
 @dataclass
