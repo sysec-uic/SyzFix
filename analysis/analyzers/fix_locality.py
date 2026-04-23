@@ -30,9 +30,39 @@ def _extract_fix_files(patch_diff: str) -> list[str]:
     return re.findall(r'diff --git a/(\S+)', patch_diff)
 
 
+_FUNC_DEF_RE = re.compile(
+    # Hunk-body line that looks like a C function *definition* header.
+    # Anchors: starts with diff marker (+, -, space), ends with ')' with
+    # no trailing ';' (so declarations are skipped), and must contain at
+    # least one whitespace-separated token before `name(` so naked macros
+    # or calls don't match.
+    r'^[+\- ]\s*'
+    r'(?:static\s+|inline\s+|extern\s+|__\w+\s+)*'
+    r'[\w\s\*]{1,80}?\s+\*?(\w+)\s*\([^;]*\)\s*$'
+)
+
+
 def _extract_hunk_functions(patch_diff: str) -> set[str]:
-    """Extract function names from @@ hunk headers."""
-    return set(re.findall(r'^@@.*@@\s+(\w+)', patch_diff, re.MULTILINE))
+    """Extract function names associated with a patch diff.
+
+    Primary source: the `@@ -a,b +c,d @@ func_name` context produced by
+    `git diff --function-context`. Fallback: scan hunk bodies for lines
+    that look like C function definitions, so hunks with blank `@@` context
+    still contribute a function name.
+    """
+    # Note: `[ \t]*` rather than `\s*` so we don't cross a newline and
+    # accidentally capture the first word of the next line when the
+    # hunk context is blank (`@@ -1,3 +1,4 @@\n static int\n...`).
+    funcs = set(re.findall(r'^@@[^@]*@@[ \t]*(\w+)', patch_diff, re.MULTILINE))
+    for line in patch_diff.splitlines():
+        if not line or line[0] not in "+- ":
+            continue
+        if line.startswith(("+++", "---")):
+            continue
+        m = _FUNC_DEF_RE.match(line)
+        if m:
+            funcs.add(m.group(1))
+    return funcs
 
 
 def _file_directory(path: str) -> str:
@@ -105,15 +135,33 @@ def compute_locality(crash_report: str, patch_diff: str) -> Optional[dict]:
             "stack_depth": len(frames),
         }
 
-    if crash_file_basenames & fix_file_basenames:
-        return {
-            "locality": "same-file",
-            "matched_files": sorted(crash_file_basenames & fix_file_basenames),
-            "crash_files": crash_files[:5],
-            "fix_files": fix_files,
-            "stack_depth": len(frames),
-            "note": "matched by basename",
-        }
+    # Basename fallback: only trust it when the crash and fix files share
+    # a top-level subsystem, otherwise `fs/foo.c` and `drivers/foo.c`
+    # would collide as "same-file".
+    shared_basenames = crash_file_basenames & fix_file_basenames
+    if shared_basenames:
+        crash_fix_by_base: dict[str, tuple[set[str], set[str]]] = {}
+        for f in crash_files:
+            crash_fix_by_base.setdefault(os.path.basename(f), (set(), set()))[0].add(
+                _file_subsystem(f)
+            )
+        for f in fix_files:
+            crash_fix_by_base.setdefault(os.path.basename(f), (set(), set()))[1].add(
+                _file_subsystem(f)
+            )
+        confirmed = sorted(
+            base for base in shared_basenames
+            if crash_fix_by_base[base][0] & crash_fix_by_base[base][1]
+        )
+        if confirmed:
+            return {
+                "locality": "same-file",
+                "matched_files": confirmed,
+                "crash_files": crash_files[:5],
+                "fix_files": fix_files,
+                "stack_depth": len(frames),
+                "note": "matched by basename within same subsystem",
+            }
 
     # 3. Same directory
     if crash_dirs & fix_dirs:

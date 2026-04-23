@@ -25,6 +25,32 @@ def _extract_fix_files(patch_diff: str) -> list[str]:
     return re.findall(r'diff --git a/(\S+)', patch_diff)
 
 
+def _lines_changed_per_file(patch_diff: str) -> dict[str, int]:
+    """Count changed lines (+ and -, excluding headers) per fix file.
+
+    Walks the diff linearly, tracking which file the current hunk belongs
+    to. Used as a weight for deciding the semantically primary fix layer
+    when a patch touches multiple files in different layers — a one-line
+    VFS fix bundled with bulk churn in a specific filesystem should still
+    be labeled as a VFS fix if VFS is where the actual behavioral change
+    lives, but the more defensible tie-breaker is line count.
+    """
+    counts: dict[str, int] = {}
+    current: str | None = None
+    for line in patch_diff.splitlines():
+        if line.startswith("diff --git "):
+            m = re.match(r'diff --git a/(\S+)', line)
+            current = m.group(1) if m else None
+            continue
+        if current is None:
+            continue
+        if line.startswith(("+++", "---")):
+            continue
+        if line.startswith(("+", "-")):
+            counts[current] = counts.get(current, 0) + 1
+    return counts
+
+
 def compute_cross_layer(
     crash_report: str, patch_diff: str,
 ) -> Optional[dict]:
@@ -47,7 +73,8 @@ def compute_cross_layer(
     if not fix_files:
         return None
 
-    crash_files = [f.file for f in frames if f.file]
+    crash_frames_with_file = [f for f in frames if f.file]
+    crash_files = [f.file for f in crash_frames_with_file]
     if not crash_files:
         return None
 
@@ -61,27 +88,56 @@ def compute_cross_layer(
         stack_overlap = "fix_off_stack"
 
     # Classify all files by domain.
-    # For crash files, preserve stack order (top = crash site) so we can
-    # determine which layer the bug actually manifests in.
     crash_by_domain = classify_files(crash_files)
     fix_by_domain = classify_files(fix_files)
 
-    # Build ordered crash classification preserving stack-trace order
-    # (first = top of stack = actual crash site)
-    crash_ordered: list[tuple[str, str, str, int]] = []  # (file, domain, layer, level)
-    for f in crash_files:
-        result = classify_file_layer(f)
+    # Build ordered crash classification preserving stack-trace order and
+    # is_inline flag, so we can prefer real (non-inline) frames when
+    # picking the layer at which the bug manifests.
+    crash_ordered: list[tuple[str, str, str, int, bool]] = []
+    for frame in crash_frames_with_file:
+        result = classify_file_layer(frame.file)
         if result:
-            crash_ordered.append((f, result[0], result[1], result[2]))
+            crash_ordered.append(
+                (frame.file, result[0], result[1], result[2], frame.is_inline)
+            )
+
+    # Per-file changed-line counts — used as tie-break weights for the
+    # primary fix layer (A2).
+    lines_per_file = _lines_changed_per_file(patch_diff)
 
     # Find domains present in both crash and fix
     shared_domains = set(crash_by_domain.keys()) & set(fix_by_domain.keys())
 
     if not shared_domains:
-        # Crash and fix don't share any domain — not cross-layer
-        # (might be cross-subsystem, handled by fix_locality analyzer)
+        # Crash and fix classify into disjoint architectural domains.
+        # Previously we returned is_cross_layer=False with no further
+        # metadata; we now additionally label this as `relation=cross_domain`
+        # and emit the majority crash/fix domain so downstream patch-location
+        # prediction can use these bugs (A4).
+        crash_domain_counts = Counter(
+            dom for _, dom, _, _, _ in crash_ordered
+        )
+        fix_domain_counts = Counter(
+            (dom, lines_per_file.get(p, 1))
+            for dom, entries in fix_by_domain.items()
+            for p, _, _ in entries
+        )
+        fix_domain_weighted: Counter = Counter()
+        for dom, entries in fix_by_domain.items():
+            for p, _, _ in entries:
+                fix_domain_weighted[dom] += max(lines_per_file.get(p, 1), 1)
+        crash_domain = (
+            crash_domain_counts.most_common(1)[0][0]
+            if crash_domain_counts else ""
+        )
+        fix_domain = (
+            fix_domain_weighted.most_common(1)[0][0]
+            if fix_domain_weighted else ""
+        )
         return {
             "is_cross_layer": False,
+            "relation": "cross_domain",
             "reason": "no_shared_domain",
             "stack_overlap": stack_overlap,
             "fix_on_stack_files": fix_on_stack,
@@ -90,6 +146,8 @@ def compute_cross_layer(
             "fix_files": fix_files,
             "crash_domains": sorted(crash_by_domain.keys()),
             "fix_domains": sorted(fix_by_domain.keys()),
+            "crash_domain": crash_domain,
+            "fix_domain": fix_domain,
         }
 
     # Check each shared domain for layer level differences.
@@ -104,13 +162,21 @@ def compute_cross_layer(
 
         # Determine the crash layer from the TOP of the stack trace
         # (where the bug actually manifests), not the majority of frames.
-        # The stack trace goes: crash site → callers → ... → syscall entry,
-        # so the first classified frame in this domain is the crash layer.
+        # Prefer the first *non-inline* frame in this domain within the
+        # top 5 classified frames; fall back to the first classified
+        # frame (inline or not) if no non-inline frame is available (A5).
+        domain_frames = [
+            (ln, lv, is_inline)
+            for _, dom, ln, lv, is_inline in crash_ordered
+            if dom == domain_name
+        ]
         primary_crash = None
-        for _, dom, ln, lv in crash_ordered:
-            if dom == domain_name:
+        for ln, lv, is_inline in domain_frames[:5]:
+            if not is_inline:
                 primary_crash = (ln, lv)
                 break
+        if primary_crash is None and domain_frames:
+            primary_crash = (domain_frames[0][0], domain_frames[0][1])
         if primary_crash is None:
             # Fallback to most common
             crash_layer_counts = Counter(
@@ -118,11 +184,22 @@ def compute_cross_layer(
             )
             primary_crash = crash_layer_counts.most_common(1)[0][0]
 
-        # For fix files, use the most common layer (no ordering bias)
-        fix_layer_counts = Counter(
-            (ln, lv) for _, ln, lv in fix_entries
-        )
-        primary_fix = fix_layer_counts.most_common(1)[0][0]
+        # For fix files, pick the layer with the most *changed lines*
+        # across files in this domain, not simply the most files (A2).
+        # Tie-break by preferring a layer that also appears on the crash
+        # stack, so a one-line VFS fix bundled with bulk churn in a
+        # specific filesystem is still labeled as touching VFS.
+        fix_layer_weights: Counter = Counter()
+        for p, ln, lv in fix_entries:
+            fix_layer_weights[(ln, lv)] += max(lines_per_file.get(p, 1), 1)
+        top_weight = max(fix_layer_weights.values())
+        top_layers = [k for k, w in fix_layer_weights.items() if w == top_weight]
+        if len(top_layers) > 1:
+            crash_layer_set = {(ln, lv) for ln, lv, _ in domain_frames}
+            preferred = [k for k in top_layers if k in crash_layer_set]
+            primary_fix = preferred[0] if preferred else top_layers[0]
+        else:
+            primary_fix = top_layers[0]
 
         # Only report if the primary layers are at different levels
         if primary_crash[1] == primary_fix[1]:
@@ -152,6 +229,7 @@ def compute_cross_layer(
     if not cross_layer_findings:
         return {
             "is_cross_layer": False,
+            "relation": "same_layer",
             "reason": "same_layer",
             "stack_overlap": stack_overlap,
             "fix_on_stack_files": fix_on_stack,
@@ -166,6 +244,7 @@ def compute_cross_layer(
 
     return {
         "is_cross_layer": True,
+        "relation": "cross_layer",
         "domain": primary["domain"],
         "crash_layer": primary["crash_layer"],
         "crash_layer_level": primary["crash_layer_level"],
@@ -217,20 +296,28 @@ class CrossLayerAnalyzer(BaseAnalyzer):
             analyzed += 1
 
             if not result["is_cross_layer"]:
-                if result.get("reason") == "no_shared_domain":
+                relation = result.get("relation", "")
+                if relation == "cross_domain":
                     no_shared_domain += 1
                 # Still record file-level info so downstream consumers
                 # (e.g. the crash_to_patch_location training task) can
-                # use same-layer / cross-subsystem bugs as supervision.
-                details.append({
+                # use same-layer / cross-domain bugs as supervision.
+                detail_record = {
                     "bug_id": bug.bug_id,
                     "title": bug.title,
                     "is_cross_layer": False,
+                    "relation": relation,
                     "reason": result.get("reason", ""),
                     "stack_overlap": result.get("stack_overlap", ""),
                     "fix_on_stack_files": result.get("fix_on_stack_files", []),
                     "fix_off_stack_files": result.get("fix_off_stack_files", []),
-                })
+                }
+                if relation == "cross_domain":
+                    detail_record["crash_domain"] = result.get("crash_domain", "")
+                    detail_record["fix_domain"] = result.get("fix_domain", "")
+                    detail_record["crash_domains"] = result.get("crash_domains", [])
+                    detail_record["fix_domains"] = result.get("fix_domains", [])
+                details.append(detail_record)
                 continue
 
             cross_layer_count += 1
@@ -248,6 +335,7 @@ class CrossLayerAnalyzer(BaseAnalyzer):
                 "bug_id": bug.bug_id,
                 "title": bug.title,
                 "is_cross_layer": True,
+                "relation": "cross_layer",
                 "domain": domain,
                 "crash_layer": result["crash_layer"],
                 "fix_layer": result["fix_layer"],

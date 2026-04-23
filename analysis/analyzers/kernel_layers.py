@@ -80,7 +80,10 @@ _FS_FRAMEWORK_PREFIXES = [
 _FS_FRAMEWORK_FILES = [
     "fs/locks.c", "fs/aio.c", "fs/direct-io.c", "fs/ioctl.c",
     "fs/eventpoll.c", "fs/select.c", "fs/signalfd.c", "fs/timerfd.c",
-    "fs/userfaultfd.c", "fs/io_uring.c",
+    "fs/userfaultfd.c", "fs/io_uring.c", "fs/io-wq.c", "fs/io-wq.h",
+    "fs/block_dev.c", "fs/fcntl.c",
+    # io_uring was promoted out of fs/ in 5.19 — treat as FS framework.
+    "io_uring/",
 ]
 
 FILESYSTEM_DOMAIN = SubsystemDomain(
@@ -143,8 +146,9 @@ NETWORKING_DOMAIN = SubsystemDomain(
             name="protocol/subsystem",
             level=1,
             path_prefixes=_NET_PROTOCOL_PREFIXES,
-            # Catch remaining net/<subdir>/
-            path_patterns=[re.compile(r'^net/[a-z][a-z0-9_]+/')],
+            # Catch remaining net/<subdir>/ — allow hyphens and a leading
+            # digit so `net/batman-adv/` and `net/8021q/` land here.
+            path_patterns=[re.compile(r'^net/[a-z0-9][a-z0-9_\-]+/')],
         ),
         KernelLayer(
             name="net driver",
@@ -218,6 +222,20 @@ DEVICE_DOMAIN = SubsystemDomain(
                 "drivers/thermal/", "drivers/clk/",
                 "drivers/dma/", "drivers/irqchip/",
                 "drivers/pinctrl/", "drivers/mailbox/",
+                "drivers/tty/", "drivers/hid/",
+                "drivers/infiniband/", "drivers/bluetooth/",
+                "drivers/platform/", "drivers/remoteproc/",
+                "drivers/s390/", "drivers/video/",
+                "drivers/vhost/", "drivers/char/",
+                "drivers/android/", "drivers/staging/",
+                "drivers/virtio/", "drivers/hv/",
+                "drivers/firewire/", "drivers/mfd/",
+                "drivers/nfc/", "drivers/cpufreq/",
+                "drivers/cpuidle/", "drivers/parport/",
+                "drivers/acpi/", "drivers/firmware/",
+                "drivers/ntb/",
+                # drivers/net/ belongs to the networking domain;
+                # drivers/crypto/ to the crypto domain.
             ],
         ),
     ],
@@ -304,16 +322,178 @@ GRAPHICS_DOMAIN = SubsystemDomain(
 )
 
 
+# ─── BPF domain ─────────────────────────────────────────────────────────────
+
+BPF_DOMAIN = SubsystemDomain(
+    name="bpf",
+    layers=[
+        KernelLayer(
+            name="bpf core",
+            level=0,
+            path_prefixes=[
+                "kernel/bpf/",
+                "include/linux/bpf.h", "include/linux/bpf_",
+                "include/linux/btf.h", "include/linux/filter.h",
+                "include/uapi/linux/bpf.h", "include/uapi/linux/bpf_",
+                "tools/bpf/", "tools/lib/bpf/",
+                "tools/testing/selftests/bpf/",
+            ],
+        ),
+    ],
+)
+
+
+# ─── Virtualization (KVM) domain ────────────────────────────────────────────
+
+VIRT_DOMAIN = SubsystemDomain(
+    name="virt",
+    layers=[
+        KernelLayer(
+            name="virt core",
+            level=0,
+            path_prefixes=[
+                "virt/kvm/",
+                "include/linux/kvm_host.h",
+                "include/linux/kvm_types.h",
+                "include/uapi/linux/kvm.h",
+            ],
+        ),
+        KernelLayer(
+            name="arch virt",
+            level=2,
+            path_patterns=[re.compile(r'^arch/[a-z0-9_]+/kvm/')],
+        ),
+    ],
+)
+
+
+# ─── Crypto domain ──────────────────────────────────────────────────────────
+
+CRYPTO_DOMAIN = SubsystemDomain(
+    name="crypto",
+    layers=[
+        KernelLayer(
+            name="crypto core",
+            level=0,
+            path_prefixes=[
+                "crypto/", "include/crypto/", "drivers/crypto/",
+                "include/linux/crypto.h",
+            ],
+        ),
+    ],
+)
+
+
+# ─── Security domain ────────────────────────────────────────────────────────
+
+SECURITY_DOMAIN = SubsystemDomain(
+    name="security",
+    layers=[
+        KernelLayer(
+            name="security",
+            level=0,
+            path_prefixes=[
+                "security/", "include/linux/security.h",
+                "include/linux/lsm_hooks.h",
+                "include/linux/audit.h", "kernel/audit",
+            ],
+        ),
+    ],
+)
+
+
+# ─── Kernel core domain ─────────────────────────────────────────────────────
+
+# Catch-all for kernel/ subsystem files that aren't in one of the more
+# specific domains above (bpf, virt, crypto, security, trace/audit etc.).
+# Includes common headers shipped with kernel/ that otherwise wouldn't
+# classify. Must be registered AFTER the more specific domains so that
+# kernel/bpf/, virt/kvm/, etc. land in their own domains first.
+KERNEL_DOMAIN = SubsystemDomain(
+    name="kernel",
+    layers=[
+        KernelLayer(
+            name="kernel core",
+            level=0,
+            path_prefixes=[
+                "kernel/sched/", "kernel/fork.c", "kernel/exit.c",
+                "kernel/signal.c", "kernel/pid.c", "kernel/kthread.c",
+                "kernel/softirq.c", "kernel/panic.c", "kernel/printk/",
+                "kernel/sys.c", "kernel/sysctl.c", "kernel/resource.c",
+                "kernel/workqueue.c", "kernel/async.c", "kernel/capability.c",
+                "kernel/cred.c", "kernel/user.c", "kernel/user_namespace.c",
+                "kernel/nsproxy.c", "kernel/pid_namespace.c",
+                "kernel/module/", "kernel/module.c", "kernel/params.c",
+                "kernel/reboot.c",
+                "include/linux/sched.h", "include/linux/sched/",
+                "include/linux/kernel.h", "include/linux/spinlock.h",
+                "include/linux/mutex.h", "include/linux/wait.h",
+                "include/linux/completion.h", "include/linux/rwsem.h",
+                "include/linux/atomic.h", "include/linux/kref.h",
+                "include/linux/list.h", "include/linux/hashtable.h",
+                "include/linux/rcupdate.h", "include/linux/workqueue.h",
+                "include/linux/timer.h", "include/linux/hrtimer.h",
+                "include/linux/jiffies.h", "include/linux/interrupt.h",
+                "include/linux/preempt.h", "include/linux/kthread.h",
+                "include/linux/pid.h", "include/linux/signal.h",
+                "include/linux/fs.h",  # already in FS VFS but harmless
+            ],
+        ),
+        KernelLayer(
+            name="kernel framework",
+            level=1,
+            path_prefixes=[
+                "kernel/locking/", "kernel/rcu/", "kernel/time/",
+                "kernel/trace/", "kernel/irq/", "kernel/cgroup/",
+                "kernel/debug/", "kernel/events/", "kernel/dma/",
+                "kernel/power/",
+            ],
+            # Catch remaining kernel/*/ subdirs as "framework" by default,
+            # plus top-level `kernel/<name>.c` files not in the core list.
+            # (Explicit level-0 prefixes above still win, because Pass 1 of
+            # domain.match checks prefixes before patterns.)
+            path_patterns=[
+                re.compile(r'^kernel/[a-z][a-z0-9_]+/'),
+                re.compile(r'^kernel/[a-z][a-z0-9_\-]+\.[ch]$'),
+            ],
+        ),
+    ],
+)
+
+
+# ─── Architecture domain ────────────────────────────────────────────────────
+
+# Catch-all for arch/<name>/ code that isn't KVM (already in VIRT_DOMAIN).
+ARCH_DOMAIN = SubsystemDomain(
+    name="arch",
+    layers=[
+        KernelLayer(
+            name="arch",
+            level=0,
+            path_patterns=[re.compile(r'^arch/[a-z0-9_]+/')],
+        ),
+    ],
+)
+
+
 # ─── All domains ────────────────────────────────────────────────────────────
 
+# Order matters — classify_file_layer returns the first matching domain.
+# More specific subsystems come first, broad catch-alls (kernel, arch) last.
 DOMAINS: list[SubsystemDomain] = [
     FILESYSTEM_DOMAIN,
     NETWORKING_DOMAIN,
     BLOCK_DOMAIN,
-    DEVICE_DOMAIN,
-    MM_DOMAIN,
-    SOUND_DOMAIN,
     GRAPHICS_DOMAIN,
+    SOUND_DOMAIN,
+    MM_DOMAIN,
+    BPF_DOMAIN,
+    VIRT_DOMAIN,
+    CRYPTO_DOMAIN,
+    SECURITY_DOMAIN,
+    DEVICE_DOMAIN,
+    KERNEL_DOMAIN,
+    ARCH_DOMAIN,
 ]
 
 
