@@ -27,6 +27,51 @@ python -m dataset.main collect --skip-patchwork
 
 Progress is saved to `dataset/data/progress.db` (SQLite) — simply re-run to resume.
 
+## Adding new bugs from syzbot (incremental update)
+
+The crawler is incremental by default: `python -m dataset.main collect` refetches
+the current syzbot fixed-bug list, merges it into `progress.db` via `INSERT OR IGNORE`,
+and only processes bugs that have not yet reached `step=processed`. Existing
+processed bugs are skipped; only the delta (new bug IDs since the last run)
+is fetched. Watch for a log line like:
+
+```
+Refreshed bug list: 119 new bugs since last run (7066 total)
+```
+
+After the incremental crawl finishes, rebuild downstream artifacts (none of
+them support per-bug incremental updates — they rebuild from the full corpus):
+
+1. **Re-export the flat JSONL**
+   ```bash
+   python -m dataset.main export --format jsonl
+   ```
+2. **Re-run the analyzers** (full run, ~2–3 min)
+   ```bash
+   python -m analysis.run_all
+   ```
+3. **Rebuild training JSONLs**
+   ```bash
+   python -m dataset.prepare_training --tasks all
+   ```
+4. **Rebuild the memory index**
+   ```bash
+   # Fast path — structured data + trajectories + rules (~3 min)
+   python -m memory.build --skip-embeddings
+
+   # Full rebuild with FAISS embeddings (~50 min CPU)
+   python -m memory.build
+   ```
+5. **Re-upload to HuggingFace**
+   ```bash
+   python -m dataset.upload_hf --repo xiaoguangwang/syzfix-dataset
+   python -m dataset.upload_hf --repo xiaoguangwang/syzfix-dataset --training
+   python -m dataset.upload_hf --repo xiaoguangwang/syzfix-dataset --processed
+   python -m dataset.upload_hf --repo xiaoguangwang/syzfix-dataset --memory
+   ```
+
+To force a full re-crawl instead, pass `--no-resume`.
+
 ## Monitor
 
 ```bash

@@ -58,6 +58,12 @@ python -m training.prepare_training --tasks bug_to_patch
 
 Once restored, you can browse individual bugs with the interactive viewer — see **[exploring.md](exploring.md)**.
 
+## Updating the dataset with new syzbot bugs
+
+If you maintain the dataset and want to add bugs that syzbot has fixed since
+the last crawl, see **[collection.md → Adding new bugs from syzbot](collection.md#adding-new-bugs-from-syzbot-incremental-update)**
+for the incremental crawl + rebuild checklist.
+
 ## Comparison
 
 | | Option A | Option B |

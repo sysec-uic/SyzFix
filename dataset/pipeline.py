@@ -140,15 +140,23 @@ async def run_pipeline(
         stats = db.get_stats()
         total_in_db = sum(stats.values())
 
-        if total_in_db == 0 or not resume:
-            bug_list = await syzbot.fetch_bug_list(client)
-            if not bug_list:
+        bug_list = await syzbot.fetch_bug_list(client)
+        if not bug_list:
+            if total_in_db == 0 or not resume:
                 logger.error("Failed to fetch bug list. Aborting.")
                 return
-            db.save_bug_list(bug_list)
-            logger.info(f"Saved {len(bug_list)} bugs to database")
+            logger.warning("Failed to refresh bug list; continuing with existing DB state.")
         else:
-            logger.info(f"Resuming with {total_in_db} bugs in database")
+            db.save_bug_list(bug_list)
+            if total_in_db == 0 or not resume:
+                logger.info(f"Saved {len(bug_list)} bugs to database")
+            else:
+                new_total = sum(db.get_stats().values())
+                added = new_total - total_in_db
+                logger.info(
+                    f"Refreshed bug list: {added} new bugs since last run "
+                    f"({new_total} total)"
+                )
 
         # Step 2: Process each bug
         pending = db.get_pending_bugs("processed")
