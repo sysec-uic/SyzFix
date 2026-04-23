@@ -26,6 +26,7 @@ dataset/data/raw/
 dataset/data/processed/
 dataset/data/dataset/
 dataset/data/training/
+dataset/data/index.jsonl
 dataset/data/*.log
 dataset/data/*.db
 
@@ -43,6 +44,7 @@ evaluation/kernel/
 evaluation/ccache/
 evaluation/rootfs/
 evaluation/workdir/
+evaluation/initramfs.cpio.gz
 
 # ── Editor / OS ───────────────────────────────────────────
 .DS_Store
@@ -54,3 +56,4 @@ evaluation/workdir/
 
 # ── Claude internal ───────────────────────────────────────
 .claude/
+.codex
