@@ -111,10 +111,22 @@ class RateLimitedClient:
                     async with session.get(url) as resp:
                         if resp.status == 200:
                             if as_json:
-                                data = await resp.json(content_type=None)
-                                return data
+                                raw = await resp.read()
+                                try:
+                                    text = raw.decode("utf-8")
+                                except UnicodeDecodeError as e:
+                                    logger.warning(
+                                        f"Non-UTF-8 bytes in JSON response from {url} "
+                                        f"({e}); decoding with errors='replace'"
+                                    )
+                                    text = raw.decode("utf-8", errors="replace")
+                                return json.loads(text)
                             else:
-                                body = await resp.text()
+                                raw = await resp.read()
+                                try:
+                                    body = raw.decode("utf-8")
+                                except UnicodeDecodeError:
+                                    body = raw.decode("utf-8", errors="replace")
                                 if use_cache:
                                     self._write_cache(url, body)
                                 return body
