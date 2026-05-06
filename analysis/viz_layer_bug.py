@@ -94,12 +94,16 @@ def _text_color_for(level: int | None) -> str:
 
 
 def _layer_examples(layer) -> list[str]:
-    """Pick a few representative path examples for display."""
+    """Return all path prefixes and regex patterns belonging to this layer.
+
+    Patterns are prefixed with `~ ` so the visualizer can distinguish
+    explicit prefixes from catch-all regexes at a glance.
+    """
     out: list[str] = []
-    out.extend(layer.path_prefixes[:6])
-    for pat in layer.path_patterns[:2]:
+    out.extend(layer.path_prefixes)
+    for pat in layer.path_patterns:
         out.append(f"~ {pat.pattern}")
-    return out[:8]
+    return out
 
 
 def serialize_taxonomy() -> list[dict]:
@@ -108,14 +112,14 @@ def serialize_taxonomy() -> list[dict]:
     for d in DOMAINS:
         layers_out: list[dict] = []
         for layer in sorted(d.layers, key=lambda l: l.level):
+            paths = _layer_examples(layer)
             layers_out.append({
                 "name": layer.name,
                 "level": layer.level,
                 "color": _color_for(d.name, layer.level),
                 "text_color": _text_color_for(layer.level),
-                "examples": _layer_examples(layer),
-                "n_prefixes": len(layer.path_prefixes),
-                "n_patterns": len(layer.path_patterns),
+                "examples": paths,
+                "n_paths": len(paths),
             })
         out.append({
             "name": d.name,
@@ -264,12 +268,16 @@ _CSS = """
   .panel { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
   .domain { margin-bottom: 14px; }
   .domain-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
-  .layer-row { display: flex; align-items: stretch; gap: 6px; margin-bottom: 3px; }
+  .layer-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
   .layer-pill { padding: 4px 10px; border-radius: 4px; font-size: 11px;
-                white-space: nowrap; min-width: 140px; font-weight: 500; }
+                white-space: nowrap; min-width: 150px; font-weight: 500;
+                flex-shrink: 0; }
   .layer-paths { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
                  font-size: 11px; color: var(--muted); padding: 4px 0; flex: 1;
-                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                 line-height: 1.7; word-break: break-word; }
+  .layer-paths .pp { display: inline-block; padding: 1px 6px; margin: 1px 1px;
+                     background: #f0f0f0; border-radius: 3px; }
+  .layer-paths .pp.regex { background: #f3edff; color: #5b3a99; }
   .frame, .fixfile { display: flex; align-items: center; gap: 8px; padding: 4px 0;
                      border-bottom: 1px dashed #eee; }
   .frame:last-child, .fixfile:last-child { border-bottom: none; }
@@ -329,17 +337,26 @@ def _render_taxonomy(taxonomy: list[dict]) -> str:
     for d in taxonomy:
         rows = []
         for layer in d["layers"]:
-            paths = " · ".join(_esc(p) for p in layer["examples"])
-            extra = ""
-            if layer["n_prefixes"] > len(layer["examples"]):
-                extra = f' <span class="meta">… +{layer["n_prefixes"] - 6} more</span>'
+            chips = []
+            for p in layer["examples"]:
+                if p.startswith("~ "):
+                    chips.append(
+                        f'<span class="pp regex" title="catch-all regex">'
+                        f'{_esc(p)}</span>'
+                    )
+                else:
+                    chips.append(f'<span class="pp">{_esc(p)}</span>')
+            count_meta = (
+                f' <span class="meta" style="font-size:10px">'
+                f'({layer["n_paths"]})</span>'
+            )
             rows.append(
                 f'<div class="layer-row">'
                 f'  <span class="layer-pill" '
                 f'        style="background:{layer["color"]};color:{layer["text_color"]}">'
-                f'    L{layer["level"]} · {_esc(layer["name"])}'
+                f'    L{layer["level"]} · {_esc(layer["name"])}{count_meta}'
                 f'  </span>'
-                f'  <span class="layer-paths">{paths}{extra}</span>'
+                f'  <span class="layer-paths">{"".join(chips)}</span>'
                 f'</div>'
             )
         parts.append(
@@ -532,16 +549,16 @@ def render_html(view: dict, taxonomy: list[dict]) -> str:
 <div class="grid">
 
   <div>
-    <h2>Kernel-layer hierarchy</h2>
-    <div class="panel">{_render_taxonomy(taxonomy)}</div>
-  </div>
-
-  <div>
     <h2>Call stack (top frames)</h2>
     <div class="panel">{crash_html}</div>
 
     <h2>Patched files (ground truth)</h2>
     <div class="panel">{fix_html}</div>
+  </div>
+
+  <div>
+    <h2>Kernel-layer hierarchy</h2>
+    <div class="panel">{_render_taxonomy(taxonomy)}</div>
   </div>
 
 </div>
