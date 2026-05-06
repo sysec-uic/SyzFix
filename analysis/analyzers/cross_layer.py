@@ -102,6 +102,20 @@ def compute_cross_layer(
                 (frame.file, result[0], result[1], result[2], frame.is_inline)
             )
 
+    # Compact per-frame layer record for downstream relax-window classifiers.
+    # Capped at top 10 classified frames to keep `result.json` size bounded.
+    crash_layers_top_n = [
+        {
+            "frame_index": idx,
+            "file": file,
+            "domain": dom,
+            "layer_name": ln,
+            "layer_level": lv,
+            "is_inline": is_inline,
+        }
+        for idx, (file, dom, ln, lv, is_inline) in enumerate(crash_ordered[:10])
+    ]
+
     # Per-file changed-line counts — used as tie-break weights for the
     # primary fix layer (A2).
     lines_per_file = _lines_changed_per_file(patch_diff)
@@ -148,6 +162,7 @@ def compute_cross_layer(
             "fix_domains": sorted(fix_by_domain.keys()),
             "crash_domain": crash_domain,
             "fix_domain": fix_domain,
+            "crash_layers_top_n": crash_layers_top_n,
         }
 
     # Check each shared domain for layer level differences.
@@ -237,6 +252,7 @@ def compute_cross_layer(
             "crash_files": crash_files[:5],
             "fix_files": fix_files,
             "shared_domains": sorted(shared_domains),
+            "crash_layers_top_n": crash_layers_top_n,
         }
 
     # Use the first (most important) finding as primary
@@ -257,7 +273,130 @@ def compute_cross_layer(
         "all_findings": cross_layer_findings,
         "crash_files": crash_files[:5],
         "fix_files": fix_files,
+        "crash_layers_top_n": crash_layers_top_n,
     }
+
+
+# ─── Mode-aware classifier ──────────────────────────────────────────────────
+
+
+_VALID_STRICT = {"stack", "layer", "combined", "off"}
+
+
+def _layer_test(
+    record: dict, relax_window: int | str
+) -> tuple[bool, str, list[int]]:
+    """Run the layer-relax test against a cross-layer record.
+
+    Returns (label, reason, matched_frame_indices). The label is True when
+    the patch's primary fix layer is *not* in the set of layers spanned by
+    the top-N non-inline crash frames in the same domain.
+    """
+    relation = record.get("relation", "")
+
+    # Cross-domain bugs cannot share a layer with the crash by construction.
+    # Always positive under any layer mode; callers can filter via `relation`.
+    if relation == "cross_domain":
+        return True, "cross_domain", []
+
+    # Same-layer records have fix layer == crash top-frame layer; under any
+    # relax window N≥1 this stays inside the window, so always negative.
+    if relation == "same_layer":
+        return False, "same_layer", []
+
+    fix_layer_level = record.get("fix_layer_level")
+    fix_domain = record.get("domain")
+    if fix_layer_level is None or not fix_domain:
+        return bool(record.get("is_cross_layer")), "fallback", []
+
+    top_n = record.get("crash_layers_top_n", []) or []
+    same_domain = [
+        f for f in top_n
+        if f.get("domain") == fix_domain and not f.get("is_inline")
+    ]
+    if not same_domain:
+        # No non-inline frame in the fix domain to anchor the test on.
+        # Fall back to the existing is_cross_layer flag (which used the same
+        # primary-frame logic upstream).
+        return bool(record.get("is_cross_layer")), "no_frames_in_domain", []
+
+    if relax_window == "all":
+        window = same_domain
+    else:
+        n = int(relax_window)
+        if n < 1:
+            raise ValueError(f"relax_window must be >=1 or 'all', got {n}")
+        window = same_domain[:n]
+
+    crash_levels = {f.get("layer_level") for f in window}
+    matched = [f.get("frame_index") for f in window]
+    if fix_layer_level in crash_levels:
+        return False, "fix_layer_in_window", matched
+    return True, "fix_layer_outside_window", matched
+
+
+def classify_under_mode(
+    record: Optional[dict],
+    *,
+    strict: str = "combined",
+    relax_window: int | str = 1,
+) -> dict:
+    """Classify a `compute_cross_layer` record under a selectable mode.
+
+    strict:
+      - "stack"    : True iff patch touches no file on the crash stack
+      - "layer"    : True iff fix layer is outside the relax-N window
+      - "combined" : both stack-strict AND layer test must hold
+      - "off"      : layer test only (alias for strict='layer')
+
+    relax_window: positive integer N or the string "all". Controls how
+    many top non-inline crash frames in the fix domain define the
+    "expected" layer set that the fix must avoid.
+
+    Cross-domain records (`relation == "cross_domain"`) are treated as
+    positive under any layer mode, since by construction the patch is
+    in a different subsystem domain than every crash frame and so
+    cannot share a layer with any of them. This intentionally differs
+    from the historic `is_cross_layer` flag, which excluded cross_domain.
+    Callers that want the historic semantics should filter on
+    `record.get("relation") == "cross_layer"` separately.
+
+    Returns:
+      {"label": bool, "reason": str, "mode": str, "matched_frames": list}
+    """
+    if strict not in _VALID_STRICT:
+        raise ValueError(f"strict must be one of {_VALID_STRICT}, got {strict!r}")
+    mode_str = f"strict={strict};relax={relax_window}"
+
+    if record is None:
+        return {"label": False, "reason": "no_record", "mode": mode_str,
+                "matched_frames": []}
+
+    stack_label = record.get("stack_overlap") == "fix_off_stack"
+    layer_label, layer_reason, matched = _layer_test(record, relax_window)
+
+    if strict == "stack":
+        label = stack_label
+        reason = "stack_off" if stack_label else "stack_on"
+    elif strict in ("layer", "off"):
+        label = layer_label
+        reason = layer_reason
+    else:  # combined
+        label = stack_label and layer_label
+        reason = (
+            f"{layer_reason}+"
+            f"{'stack_off' if stack_label else 'stack_on'}"
+        )
+
+    return {
+        "label": label,
+        "reason": reason,
+        "mode": mode_str,
+        "matched_frames": matched,
+    }
+
+
+# ─── Analyzer wrapper ───────────────────────────────────────────────────────
 
 
 class CrossLayerAnalyzer(BaseAnalyzer):
@@ -311,6 +450,8 @@ class CrossLayerAnalyzer(BaseAnalyzer):
                     "stack_overlap": result.get("stack_overlap", ""),
                     "fix_on_stack_files": result.get("fix_on_stack_files", []),
                     "fix_off_stack_files": result.get("fix_off_stack_files", []),
+                    "crash_layers_top_n": result.get("crash_layers_top_n", []),
+                    "shared_domains": result.get("shared_domains", []),
                 }
                 if relation == "cross_domain":
                     detail_record["crash_domain"] = result.get("crash_domain", "")
@@ -338,11 +479,14 @@ class CrossLayerAnalyzer(BaseAnalyzer):
                 "relation": "cross_layer",
                 "domain": domain,
                 "crash_layer": result["crash_layer"],
+                "crash_layer_level": result.get("crash_layer_level"),
                 "fix_layer": result["fix_layer"],
+                "fix_layer_level": result.get("fix_layer_level"),
                 "direction": direction,
                 "stack_overlap": overlap,
                 "fix_on_stack_files": result.get("fix_on_stack_files", []),
                 "fix_off_stack_files": result.get("fix_off_stack_files", []),
+                "crash_layers_top_n": result.get("crash_layers_top_n", []),
             }
             details.append(detail)
 
