@@ -1,0 +1,542 @@
+#!/usr/bin/env python3
+"""Visualize a bug's call stack and patch files on the kernel-layer hierarchy.
+
+Generates a single self-contained HTML page per bug with:
+  • the full kernel-layer taxonomy (13 domains × up to 3 levels), introspected
+    live from `analysis/analyzers/kernel_layers.py` so the picture stays in
+    sync with the source-of-truth definitions
+  • the crash call stack, each frame coloured by its (domain, level)
+  • the ground-truth patched files, each coloured by its (domain, level),
+    with on-stack vs off-stack visually distinguished
+
+Examples:
+
+    # One bug → one HTML file
+    python -m analysis.viz_layer_bug --bug-id 5b64180f8d9e39d3f061
+
+    # Multiple bugs → directory + index page
+    python -m analysis.viz_layer_bug \\
+        --bug-id 5b64180f8d9e39d3f061,037e18398ba8c655a652,0039110f932d438130f9 \\
+        --out viz/
+
+    # Random sample
+    python -m analysis.viz_layer_bug --sample 10 --out viz/
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+import random
+import re
+import sys
+from dataclasses import asdict
+from pathlib import Path
+from typing import Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from analysis.analyzers.kernel_layers import (
+    DOMAINS, classify_file_layer,
+)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_INPUT = (
+    PROJECT_ROOT / "analysis" / "results" / "cross-layer_analysis" / "result.json"
+)
+
+
+# ─── Colour scheme ──────────────────────────────────────────────────────────
+
+
+def _domain_hue(domain_name: str) -> int:
+    """Stable hue [0..360) per domain — order matches DOMAINS list."""
+    names = [d.name for d in DOMAINS]
+    if domain_name in names:
+        idx = names.index(domain_name)
+    else:
+        idx = sum(ord(c) for c in domain_name) % len(names)
+    # Spread hues evenly around the wheel.
+    return int(idx * (360 / max(len(names), 1)))
+
+
+def _level_palette(level: int) -> tuple[int, int]:
+    """Return (saturation%, lightness%) for a level. L0 darkest, L2 lightest."""
+    # L0 = abstract/core (saturated, dark)  → high contrast
+    # L1 = framework/bus (medium)
+    # L2 = specific impl (light, less saturated)
+    if level == 0:
+        return (75, 38)
+    if level == 1:
+        return (60, 52)
+    return (50, 68)  # level 2 or unknown
+
+
+def _color_for(domain: str | None, level: int | None) -> str:
+    if not domain or level is None:
+        return "hsl(0, 0%, 80%)"  # gray for unclassified
+    h = _domain_hue(domain)
+    s, l = _level_palette(level)
+    return f"hsl({h}, {s}%, {l}%)"
+
+
+def _text_color_for(level: int | None) -> str:
+    if level is None or level >= 2:
+        return "#222"
+    return "#fff"
+
+
+# ─── Taxonomy serialization ─────────────────────────────────────────────────
+
+
+def _layer_examples(layer) -> list[str]:
+    """Pick a few representative path examples for display."""
+    out: list[str] = []
+    out.extend(layer.path_prefixes[:6])
+    for pat in layer.path_patterns[:2]:
+        out.append(f"~ {pat.pattern}")
+    return out[:8]
+
+
+def serialize_taxonomy() -> list[dict]:
+    """Build a JSON-friendly view of DOMAINS for the taxonomy panel."""
+    out: list[dict] = []
+    for d in DOMAINS:
+        layers_out: list[dict] = []
+        for layer in sorted(d.layers, key=lambda l: l.level):
+            layers_out.append({
+                "name": layer.name,
+                "level": layer.level,
+                "color": _color_for(d.name, layer.level),
+                "text_color": _text_color_for(layer.level),
+                "examples": _layer_examples(layer),
+                "n_prefixes": len(layer.path_prefixes),
+                "n_patterns": len(layer.path_patterns),
+            })
+        out.append({
+            "name": d.name,
+            "hue": _domain_hue(d.name),
+            "n_layers": len(layers_out),
+            "layers": layers_out,
+        })
+    return out
+
+
+# ─── Bug data extraction ────────────────────────────────────────────────────
+
+
+def _classify_for_viz(file: str) -> dict:
+    """Classify a fix file path. Returns viz-friendly dict."""
+    cls = classify_file_layer(file)
+    if cls is None:
+        return {
+            "file": file,
+            "domain": None,
+            "layer_name": None,
+            "layer_level": None,
+            "color": _color_for(None, None),
+            "text_color": "#222",
+        }
+    domain, layer_name, level = cls
+    return {
+        "file": file,
+        "domain": domain,
+        "layer_name": layer_name,
+        "layer_level": level,
+        "color": _color_for(domain, level),
+        "text_color": _text_color_for(level),
+    }
+
+
+def build_bug_view(record: dict) -> dict:
+    """Produce a viz-ready dict from a cross-layer analyzer detail record."""
+    crash_frames = []
+    for f in record.get("crash_layers_top_n", []):
+        crash_frames.append({
+            "frame_index": f.get("frame_index"),
+            "file": f.get("file"),
+            "domain": f.get("domain"),
+            "layer_name": f.get("layer_name"),
+            "layer_level": f.get("layer_level"),
+            "is_inline": f.get("is_inline", False),
+            "color": _color_for(f.get("domain"), f.get("layer_level")),
+            "text_color": _text_color_for(f.get("layer_level")),
+        })
+
+    on_stack = [
+        {**_classify_for_viz(p), "on_stack": True}
+        for p in record.get("fix_on_stack_files", [])
+    ]
+    off_stack = [
+        {**_classify_for_viz(p), "on_stack": False}
+        for p in record.get("fix_off_stack_files", [])
+    ]
+    fix_files = on_stack + off_stack
+
+    headline = {
+        "relation": record.get("relation", ""),
+        "domain": record.get("domain") or record.get("crash_domain") or "",
+        "fix_domain": record.get("fix_domain") or "",
+        "crash_layer": record.get("crash_layer", ""),
+        "fix_layer": record.get("fix_layer", ""),
+        "direction": record.get("direction", ""),
+        "stack_overlap": record.get("stack_overlap", ""),
+    }
+
+    return {
+        "bug_id": record.get("bug_id"),
+        "title": record.get("title", ""),
+        "headline": headline,
+        "crash_frames": crash_frames,
+        "fix_files": fix_files,
+        "raw": record,  # kept for the data-dump panel
+    }
+
+
+# ─── HTML rendering ─────────────────────────────────────────────────────────
+
+
+_CSS = """
+  :root { --fg:#222; --muted:#777; --line:#ddd; --bg:#fafafa; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         margin: 0; padding: 24px; color: var(--fg); background: var(--bg); }
+  h1 { font-size: 18px; margin: 0 0 6px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em;
+       color: var(--muted); margin: 20px 0 8px; border-bottom: 1px solid var(--line); padding-bottom: 4px;}
+  .meta { color: var(--muted); font-size: 12px; }
+  .meta b { color: var(--fg); font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 12px; }
+  @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .domain { margin-bottom: 14px; }
+  .domain-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+  .layer-row { display: flex; align-items: stretch; gap: 6px; margin-bottom: 3px; }
+  .layer-pill { padding: 4px 10px; border-radius: 4px; font-size: 11px;
+                white-space: nowrap; min-width: 140px; font-weight: 500; }
+  .layer-paths { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                 font-size: 11px; color: var(--muted); padding: 4px 0; flex: 1;
+                 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .frame, .fixfile { display: flex; align-items: center; gap: 8px; padding: 4px 0;
+                     border-bottom: 1px dashed #eee; }
+  .frame:last-child, .fixfile:last-child { border-bottom: none; }
+  .chip { padding: 3px 9px; border-radius: 4px; font-size: 11px; font-weight: 500;
+          white-space: nowrap; min-width: 130px; text-align: left; }
+  .chip-num { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px;
+              width: 22px; text-align: right; }
+  .path { font-family: ui-monospace, monospace; font-size: 12px; flex: 1;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 10px; padding: 1px 6px; border-radius: 3px;
+           background: #eef; color: #335; margin-left: 4px; }
+  .badge-inline { background: #fde; color: #743; }
+  .badge-onstack { background: #cef; color: #036; }
+  .badge-offstack { background: #fed; color: #722; }
+  .relation-cross_layer  { background: #ffeac0; color: #6b4500; }
+  .relation-cross_domain { background: #ffd6d0; color: #771511; }
+  .relation-same_layer   { background: #d8ecd8; color: #15461a; }
+  .pillbar { display: inline-block; padding: 2px 8px; border-radius: 12px;
+             font-size: 11px; font-weight: 600; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  details pre { font-size: 11px; background: #f4f4f4; padding: 8px; border-radius: 6px;
+                overflow: auto; }
+"""
+
+
+def _esc(s) -> str:
+    if s is None:
+        return ""
+    return html.escape(str(s))
+
+
+def _render_taxonomy(taxonomy: list[dict]) -> str:
+    parts = []
+    for d in taxonomy:
+        rows = []
+        for layer in d["layers"]:
+            paths = " · ".join(_esc(p) for p in layer["examples"])
+            extra = ""
+            if layer["n_prefixes"] > len(layer["examples"]):
+                extra = f' <span class="meta">… +{layer["n_prefixes"] - 6} more</span>'
+            rows.append(
+                f'<div class="layer-row">'
+                f'  <span class="layer-pill" '
+                f'        style="background:{layer["color"]};color:{layer["text_color"]}">'
+                f'    L{layer["level"]} · {_esc(layer["name"])}'
+                f'  </span>'
+                f'  <span class="layer-paths">{paths}{extra}</span>'
+                f'</div>'
+            )
+        parts.append(
+            f'<div class="domain">'
+            f'  <div class="domain-name">{_esc(d["name"])} '
+            f'  <span class="meta">({d["n_layers"]} layer{"" if d["n_layers"]==1 else "s"})</span></div>'
+            f'  {"".join(rows)}'
+            f'</div>'
+        )
+    return "\n".join(parts)
+
+
+def _render_frame(frame: dict) -> str:
+    name = (frame["layer_name"] or "unclassified")
+    label = (
+        f'L{frame["layer_level"]} · {_esc(frame["domain"])}'
+        if frame["layer_level"] is not None else "unclassified"
+    )
+    inline = (
+        '<span class="badge badge-inline">inline</span>' if frame["is_inline"] else ""
+    )
+    chip = (
+        f'<span class="chip" '
+        f'      style="background:{frame["color"]};color:{frame["text_color"]}" '
+        f'      title="{_esc(frame["domain"])} / {_esc(name)}">{label}</span>'
+    )
+    return (
+        f'<div class="frame">'
+        f'  <span class="chip-num">#{frame["frame_index"]}</span>'
+        f'  {chip}'
+        f'  <span class="path" title="{_esc(name)}">{_esc(frame["file"])}</span>'
+        f'  {inline}'
+        f'</div>'
+    )
+
+
+def _render_fix(fix: dict) -> str:
+    label = (
+        f'L{fix["layer_level"]} · {_esc(fix["domain"])}'
+        if fix["layer_level"] is not None else "unclassified"
+    )
+    chip = (
+        f'<span class="chip" '
+        f'      style="background:{fix["color"]};color:{fix["text_color"]}" '
+        f'      title="{_esc(fix["domain"])} / {_esc(fix["layer_name"])}">{label}</span>'
+    )
+    badge = (
+        '<span class="badge badge-onstack">on stack</span>' if fix["on_stack"]
+        else '<span class="badge badge-offstack">off stack</span>'
+    )
+    return (
+        f'<div class="fixfile">'
+        f'  {chip}'
+        f'  <span class="path">{_esc(fix["file"])}</span>'
+        f'  {badge}'
+        f'</div>'
+    )
+
+
+def render_html(view: dict, taxonomy: list[dict]) -> str:
+    h = view["headline"]
+    relation = h.get("relation") or "unknown"
+    rel_pill = (
+        f'<span class="pillbar relation-{relation}">{_esc(relation)}</span>'
+    )
+    direction = h.get("direction")
+    direction_html = (
+        f' · direction <b>{_esc(direction)}</b>' if direction else ""
+    )
+    cross_dom_html = ""
+    if relation == "cross_domain":
+        cross_dom_html = (
+            f' · crash domain <b>{_esc(h.get("domain"))}</b>'
+            f' → fix domain <b>{_esc(h.get("fix_domain"))}</b>'
+        )
+    elif h.get("domain"):
+        cross_dom_html = f' · domain <b>{_esc(h["domain"])}</b>'
+    layer_html = ""
+    if h.get("crash_layer") and h.get("fix_layer"):
+        layer_html = (
+            f' · crash <b>{_esc(h["crash_layer"])}</b>'
+            f' → fix <b>{_esc(h["fix_layer"])}</b>'
+        )
+    stack = h.get("stack_overlap")
+    stack_html = f' · stack <b>{_esc(stack)}</b>' if stack else ""
+
+    crash_html = "\n".join(_render_frame(f) for f in view["crash_frames"]) \
+                 or '<div class="meta">(no classified frames)</div>'
+    fix_html = "\n".join(_render_fix(f) for f in view["fix_files"]) \
+               or '<div class="meta">(no fix files)</div>'
+
+    raw_json = _esc(json.dumps(view["raw"], indent=2, default=str))
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SyzFix · {_esc(view['bug_id'])}</title>
+<style>{_CSS}</style>
+</head>
+<body>
+<h1>{_esc(view['title'] or '(no title)')}</h1>
+<div class="meta">
+  bug <b>{_esc(view['bug_id'])}</b> · {rel_pill}{cross_dom_html}{direction_html}{stack_html}{layer_html}
+</div>
+
+<div class="grid">
+
+  <div>
+    <h2>Kernel-layer hierarchy</h2>
+    <div class="panel">{_render_taxonomy(taxonomy)}</div>
+  </div>
+
+  <div>
+    <h2>Call stack (top frames)</h2>
+    <div class="panel">{crash_html}</div>
+
+    <h2>Patched files (ground truth)</h2>
+    <div class="panel">{fix_html}</div>
+  </div>
+
+</div>
+
+<details style="margin-top:24px">
+<summary>raw analyzer record</summary>
+<pre>{raw_json}</pre>
+</details>
+
+</body>
+</html>
+"""
+
+
+# ─── Index page (when generating multiple bugs) ─────────────────────────────
+
+
+def render_index(views: list[dict], hrefs: list[str]) -> str:
+    rows = []
+    for v, href in zip(views, hrefs):
+        h = v["headline"]
+        rel = h.get("relation") or "unknown"
+        rows.append(
+            f'<tr>'
+            f'  <td><a href="{_esc(href)}">{_esc(v["bug_id"])}</a></td>'
+            f'  <td><span class="pillbar relation-{rel}">{_esc(rel)}</span></td>'
+            f'  <td>{_esc(h.get("domain") or h.get("fix_domain") or "")}</td>'
+            f'  <td>{_esc(h.get("crash_layer") or "")}</td>'
+            f'  <td>{_esc(h.get("fix_layer") or "")}</td>'
+            f'  <td>{_esc(h.get("direction") or "")}</td>'
+            f'  <td class="path">{_esc(v.get("title", ""))}</td>'
+            f'</tr>'
+        )
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>SyzFix · viz index</title>
+<style>{_CSS}
+table {{ border-collapse: collapse; width: 100%; background: #fff; }}
+td, th {{ border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; font-size: 13px; }}
+th {{ font-size: 12px; text-transform: uppercase; color: var(--muted); }}
+</style></head>
+<body>
+<h1>SyzFix layer visualizer · {len(views)} bugs</h1>
+<div class="meta">click a bug_id to open its layered view</div>
+<table>
+<tr><th>bug_id</th><th>relation</th><th>domain</th><th>crash layer</th><th>fix layer</th><th>direction</th><th>title</th></tr>
+{"".join(rows)}
+</table>
+</body></html>
+"""
+
+
+# ─── CLI ────────────────────────────────────────────────────────────────────
+
+
+def _load_records(input_path: Path) -> dict[str, dict]:
+    if not input_path.exists():
+        sys.exit(
+            f"[viz_layer_bug] Missing {input_path}. "
+            f"Run `python -m analysis.run_all --analyzer crosslayer` first."
+        )
+    data = json.loads(input_path.read_text())
+    return {r["bug_id"]: r for r in data.get("details", []) if r.get("bug_id")}
+
+
+def _resolve_ids(
+    records: dict[str, dict], bug_ids: list[str], sample: int, prefix_match: bool,
+) -> list[str]:
+    chosen: list[str] = []
+    if bug_ids:
+        for raw in bug_ids:
+            if raw in records:
+                chosen.append(raw)
+                continue
+            if prefix_match:
+                hits = [k for k in records if k.startswith(raw)]
+                if len(hits) == 1:
+                    chosen.append(hits[0])
+                    continue
+                if len(hits) > 1:
+                    print(f"[viz] ambiguous bug-id prefix {raw!r}: {hits[:5]}…")
+                    continue
+            print(f"[viz] no record for bug_id {raw!r}", file=sys.stderr)
+    if sample > 0:
+        random.seed(0)
+        chosen.extend(random.sample(list(records.keys()),
+                                    min(sample, len(records))))
+    # Dedup preserving order
+    seen: set[str] = set()
+    return [b for b in chosen if not (b in seen or seen.add(b))]
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(
+        description="Visualize a bug's call stack and patch on the kernel-layer hierarchy",
+    )
+    ap.add_argument(
+        "--bug-id", default="",
+        help="Comma-separated bug IDs (or unique prefixes when --prefix-match).",
+    )
+    ap.add_argument(
+        "--sample", type=int, default=0,
+        help="Pick N random bugs from the dataset (deterministic, seed=0).",
+    )
+    ap.add_argument(
+        "--input", default=str(DEFAULT_INPUT), type=Path,
+        help="Path to cross-layer analyzer result.json",
+    )
+    ap.add_argument(
+        "--out", default=None,
+        help="Output HTML path (single bug) or directory (multiple bugs). "
+             "Default: ./viz_<bug_id>.html or ./viz/.",
+    )
+    ap.add_argument(
+        "--prefix-match", action="store_true",
+        help="Allow --bug-id to be a unique prefix of a real bug_id.",
+    )
+    args = ap.parse_args()
+
+    if not args.bug_id and not args.sample:
+        ap.error("provide --bug-id or --sample")
+
+    records = _load_records(args.input)
+    ids_input = [s.strip() for s in args.bug_id.split(",") if s.strip()]
+    ids = _resolve_ids(records, ids_input, args.sample, args.prefix_match)
+    if not ids:
+        sys.exit("[viz_layer_bug] no bugs to render")
+
+    taxonomy = serialize_taxonomy()
+    views = [build_bug_view(records[bid]) for bid in ids]
+
+    # Resolve output target.
+    if len(views) == 1:
+        out_path = Path(args.out) if args.out else (
+            Path(f"viz_{views[0]['bug_id']}.html")
+        )
+        if out_path.is_dir():
+            out_path = out_path / f"{views[0]['bug_id']}.html"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(render_html(views[0], taxonomy))
+        print(f"[viz_layer_bug] wrote {out_path}")
+        return
+
+    out_dir = Path(args.out) if args.out else Path("viz")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    hrefs: list[str] = []
+    for v in views:
+        path = out_dir / f"{v['bug_id']}.html"
+        path.write_text(render_html(v, taxonomy))
+        hrefs.append(path.name)
+    index = out_dir / "index.html"
+    index.write_text(render_index(views, hrefs))
+    print(f"[viz_layer_bug] wrote {len(views)} bug pages + {index}")
+
+
+if __name__ == "__main__":
+    main()

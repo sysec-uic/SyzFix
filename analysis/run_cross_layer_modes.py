@@ -43,6 +43,7 @@ DEFAULT_BY_MODE_DIR = (
 
 STRICT_CHOICES = ("stack", "layer", "combined", "off")
 DIRECTION_CHOICES = ("fix_in_upper_layer", "fix_in_lower_layer", "any")
+RELATION_CHOICES = ("cross_layer", "cross_domain", "same_layer", "any")
 
 
 def _parse_relax_window(s: str) -> int | str:
@@ -55,8 +56,12 @@ def _parse_relax_window(s: str) -> int | str:
 
 
 def _record_passes_filters(
-    record: dict, *, direction: str, domain: str | None
+    record: dict, *, direction: str, domain: str | None,
+    relation: str = "any",
 ) -> bool:
+    if relation != "any":
+        if record.get("relation") != relation:
+            return False
     if direction != "any":
         if record.get("direction") != direction:
             return False
@@ -79,7 +84,8 @@ def _record_passes_filters(
 
 
 def _summarize(
-    details: list[dict], *, strict: str, relax_window, direction: str, domain: str
+    details: list[dict], *, strict: str, relax_window, direction: str, domain: str,
+    relation: str = "any",
 ) -> dict:
     """Compute summary stats and labelled subset for a (strict, window) pair."""
     total = 0
@@ -89,7 +95,9 @@ def _summarize(
     by_direction = Counter()
     positives: list[dict] = []
     for r in details:
-        if not _record_passes_filters(r, direction=direction, domain=domain):
+        if not _record_passes_filters(
+            r, direction=direction, domain=domain, relation=relation
+        ):
             continue
         total += 1
         out = classify_under_mode(r, strict=strict, relax_window=relax_window)
@@ -123,7 +131,7 @@ def _summarize(
             )
     return {
         "mode": f"strict={strict};relax={relax_window}",
-        "filters": {"direction": direction, "domain": domain},
+        "filters": {"direction": direction, "domain": domain, "relation": relation},
         "total_considered": total,
         "positive": positive,
         "prevalence": (positive / total) if total else 0.0,
@@ -222,6 +230,11 @@ def main() -> None:
         help="Filter by cross-layer direction (default: any)",
     )
     ap.add_argument(
+        "--relation", choices=RELATION_CHOICES, default="any",
+        help="Filter by analyzer relation (cross_layer, cross_domain, "
+             "same_layer, or any). Default 'any'.",
+    )
+    ap.add_argument(
         "--domain", default="any",
         help="Filter by domain name (filesystem, networking, block, device, "
              "graphics, sound, virt, mm, kernel, bpf, crypto, security, arch, "
@@ -257,6 +270,7 @@ def main() -> None:
         relax_window=args.relax_window,
         direction=args.direction,
         domain=args.domain,
+        relation=args.relation,
     )
     _print_summary(summary, top_examples=args.top_examples)
 
