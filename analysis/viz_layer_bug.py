@@ -45,6 +45,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_INPUT = (
     PROJECT_ROOT / "analysis" / "results" / "cross-layer_analysis" / "result.json"
 )
+DEFAULT_PROCESSED_DIR = (
+    PROJECT_ROOT / "dataset" / "data" / "processed"
+)
 
 
 # ─── Colour scheme ──────────────────────────────────────────────────────────
@@ -126,6 +129,47 @@ def serialize_taxonomy() -> list[dict]:
 # ─── Bug data extraction ────────────────────────────────────────────────────
 
 
+def load_patch_diffs(
+    bug_id: str, processed_dir: Path = DEFAULT_PROCESSED_DIR,
+) -> dict[str, str]:
+    """Load the bug's per-file patch diff from processed/<bug_id>.json.
+
+    Concatenates all `fix_commits[*].patch_diff` (most bugs have one),
+    splits on `diff --git a/<path>` headers, and returns a map
+    {file_path: diff_chunk}. Returns empty dict if the file is missing
+    or has no patch.
+    """
+    path = processed_dir / f"{bug_id}.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    pieces: list[str] = []
+    for fc in data.get("fix_commits") or []:
+        diff = fc.get("patch_diff") or ""
+        if diff:
+            pieces.append(diff)
+    if not pieces:
+        return {}
+    full = "\n".join(pieces)
+
+    # Split on `diff --git a/<file>` lines. The first segment before the
+    # first such header is the commit message / mailbox metadata; drop it.
+    out: dict[str, str] = {}
+    chunks = re.split(r'(?m)^(?=diff --git a/)', full)
+    for chunk in chunks:
+        m = re.match(r'diff --git a/(\S+)', chunk)
+        if not m:
+            continue
+        file_path = m.group(1)
+        # Last write wins if a path appears twice (rename + edit).
+        out[file_path] = chunk.rstrip()
+    return out
+
+
 def _classify_for_viz(file: str) -> dict:
     """Classify a fix file path. Returns viz-friendly dict."""
     cls = classify_file_layer(file)
@@ -149,13 +193,19 @@ def _classify_for_viz(file: str) -> dict:
     }
 
 
-def build_bug_view(record: dict) -> dict:
+def build_bug_view(
+    record: dict,
+    *,
+    processed_dir: Path = DEFAULT_PROCESSED_DIR,
+) -> dict:
     """Produce a viz-ready dict from a cross-layer analyzer detail record."""
     crash_frames = []
     for f in record.get("crash_layers_top_n", []):
         crash_frames.append({
             "frame_index": f.get("frame_index"),
             "file": f.get("file"),
+            "function": f.get("function") or "",
+            "line": f.get("line") or 0,
             "domain": f.get("domain"),
             "layer_name": f.get("layer_name"),
             "layer_level": f.get("layer_level"),
@@ -164,14 +214,16 @@ def build_bug_view(record: dict) -> dict:
             "text_color": _text_color_for(f.get("layer_level")),
         })
 
-    on_stack = [
-        {**_classify_for_viz(p), "on_stack": True}
-        for p in record.get("fix_on_stack_files", [])
-    ]
-    off_stack = [
-        {**_classify_for_viz(p), "on_stack": False}
-        for p in record.get("fix_off_stack_files", [])
-    ]
+    diffs_by_file = load_patch_diffs(record.get("bug_id", ""), processed_dir)
+
+    def _enrich(p: str, on_stack: bool) -> dict:
+        info = _classify_for_viz(p)
+        info["on_stack"] = on_stack
+        info["patch_diff"] = diffs_by_file.get(p, "")
+        return info
+
+    on_stack = [_enrich(p, True) for p in record.get("fix_on_stack_files", [])]
+    off_stack = [_enrich(p, False) for p in record.get("fix_off_stack_files", [])]
     fix_files = on_stack + off_stack
 
     headline = {
@@ -240,6 +292,29 @@ _CSS = """
   details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
   details pre { font-size: 11px; background: #f4f4f4; padding: 8px; border-radius: 6px;
                 overflow: auto; }
+  .frame-main { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .func { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+          font-weight: 600; color: var(--fg);
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-line { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+               color: var(--muted);
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fix-row { display: flex; flex-direction: column; padding: 6px 0;
+             border-bottom: 1px dashed #eee; }
+  .fix-row:last-child { border-bottom: none; }
+  .fix-head { display: flex; align-items: center; gap: 8px; }
+  details.diff { margin-top: 6px; }
+  details.diff[open] { background: #fcfcfc; padding: 6px 8px; border-radius: 4px;
+                      border: 1px solid #eee; }
+  pre.diff-body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                  font-size: 11.5px; line-height: 1.45; margin: 6px 0 0;
+                  padding: 8px; background: #fafafa; border-radius: 4px;
+                  overflow-x: auto; max-height: 360px; }
+  .diff-add  { background: #e6ffed; color: #1a7f37; display: block; }
+  .diff-del  { background: #ffeef0; color: #b3201e; display: block; }
+  .diff-hunk { background: #f1f8ff; color: #032f62; display: block; font-weight: 600; }
+  .diff-meta { color: var(--muted); display: block; }
+  .diff-ctx  { display: block; }
 """
 
 
@@ -291,14 +366,64 @@ def _render_frame(frame: dict) -> str:
         f'      style="background:{frame["color"]};color:{frame["text_color"]}" '
         f'      title="{_esc(frame["domain"])} / {_esc(name)}">{label}</span>'
     )
+    func = frame.get("function") or ""
+    line = frame.get("line") or 0
+    file_path = frame.get("file") or ""
+    func_html = (
+        f'<span class="func">{_esc(func)}()</span>' if func
+        else f'<span class="func">{_esc(file_path)}</span>'
+    )
+    line_suffix = f":{line}" if line else ""
+    file_html = (
+        f'<span class="file-line">{_esc(file_path)}{line_suffix}</span>'
+        if func else ""
+    )
     return (
         f'<div class="frame">'
         f'  <span class="chip-num">#{frame["frame_index"]}</span>'
         f'  {chip}'
-        f'  <span class="path" title="{_esc(name)}">{_esc(frame["file"])}</span>'
+        f'  <span class="frame-main">{func_html}{file_html}</span>'
         f'  {inline}'
         f'</div>'
     )
+
+
+def _render_diff_body(diff_text: str) -> str:
+    """Render a single file's diff with line-level coloring.
+
+    Strips git diff/index/+++/--- header noise (only useful when present
+    for context) and shows hunks with classic +/- highlighting. Each
+    line gets a CSS class to color additions, deletions, hunk headers,
+    and context.
+    """
+    if not diff_text:
+        return '<div class="meta">(diff text not available)</div>'
+
+    lines: list[str] = []
+    for raw in diff_text.splitlines():
+        if (
+            raw.startswith("diff --git")
+            or raw.startswith("index ")
+            or raw.startswith("new file mode")
+            or raw.startswith("deleted file mode")
+            or raw.startswith("similarity index")
+            or raw.startswith("rename from")
+            or raw.startswith("rename to")
+        ):
+            cls = "diff-meta"
+        elif raw.startswith(("+++", "---")):
+            cls = "diff-meta"
+        elif raw.startswith("@@"):
+            cls = "diff-hunk"
+        elif raw.startswith("+"):
+            cls = "diff-add"
+        elif raw.startswith("-"):
+            cls = "diff-del"
+        else:
+            cls = "diff-ctx"
+        text = _esc(raw) or "&nbsp;"
+        lines.append(f'<span class="{cls}">{text}</span>')
+    return f'<pre class="diff-body">{"".join(lines)}</pre>'
 
 
 def _render_fix(fix: dict) -> str:
@@ -315,11 +440,44 @@ def _render_fix(fix: dict) -> str:
         '<span class="badge badge-onstack">on stack</span>' if fix["on_stack"]
         else '<span class="badge badge-offstack">off stack</span>'
     )
+
+    diff_text = fix.get("patch_diff") or ""
+    if diff_text:
+        # Count + and - lines for the summary
+        adds = sum(
+            1 for ln in diff_text.splitlines()
+            if ln.startswith("+") and not ln.startswith("+++")
+        )
+        dels = sum(
+            1 for ln in diff_text.splitlines()
+            if ln.startswith("-") and not ln.startswith("---")
+        )
+        diff_summary = (
+            f'<span class="meta" style="font-size:11px">'
+            f'(<span style="color:#1a7f37">+{adds}</span> '
+            f'<span style="color:#b3201e">-{dels}</span>)</span>'
+        )
+        diff_block = (
+            f'<details class="diff">'
+            f'  <summary>show diff {diff_summary}</summary>'
+            f'  {_render_diff_body(diff_text)}'
+            f'</details>'
+        )
+    else:
+        diff_block = (
+            '<div class="meta" style="font-size:11px">'
+            '(diff not available — run from project root with '
+            'dataset/data/processed/ populated)</div>'
+        )
+
     return (
-        f'<div class="fixfile">'
-        f'  {chip}'
-        f'  <span class="path">{_esc(fix["file"])}</span>'
-        f'  {badge}'
+        f'<div class="fix-row">'
+        f'  <div class="fix-head">'
+        f'    {chip}'
+        f'    <span class="path">{_esc(fix["file"])}</span>'
+        f'    {badge}'
+        f'  </div>'
+        f'  {diff_block}'
         f'</div>'
     )
 

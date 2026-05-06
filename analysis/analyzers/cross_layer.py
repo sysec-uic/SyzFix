@@ -94,13 +94,18 @@ def compute_cross_layer(
     # Build ordered crash classification preserving stack-trace order and
     # is_inline flag, so we can prefer real (non-inline) frames when
     # picking the layer at which the bug manifests.
-    crash_ordered: list[tuple[str, str, str, int, bool]] = []
+    # Tuple shape: (file, domain, layer_name, layer_level, is_inline,
+    #               function, line). Function and line are kept alongside
+    #               the layer info so the visualizer can render call-stack
+    #               provenance without re-parsing the crash report.
+    crash_ordered: list[tuple[str, str, str, int, bool, str, int]] = []
     for frame in crash_frames_with_file:
         result = classify_file_layer(frame.file)
         if result:
-            crash_ordered.append(
-                (frame.file, result[0], result[1], result[2], frame.is_inline)
-            )
+            crash_ordered.append((
+                frame.file, result[0], result[1], result[2], frame.is_inline,
+                frame.function or "", int(frame.line or 0),
+            ))
 
     # Compact per-frame layer record for downstream relax-window classifiers.
     # Capped at top 10 classified frames to keep `result.json` size bounded.
@@ -112,8 +117,12 @@ def compute_cross_layer(
             "layer_name": ln,
             "layer_level": lv,
             "is_inline": is_inline,
+            "function": function,
+            "line": line,
         }
-        for idx, (file, dom, ln, lv, is_inline) in enumerate(crash_ordered[:10])
+        for idx, (
+            file, dom, ln, lv, is_inline, function, line
+        ) in enumerate(crash_ordered[:10])
     ]
 
     # Per-file changed-line counts — used as tie-break weights for the
@@ -130,7 +139,7 @@ def compute_cross_layer(
         # and emit the majority crash/fix domain so downstream patch-location
         # prediction can use these bugs (A4).
         crash_domain_counts = Counter(
-            dom for _, dom, _, _, _ in crash_ordered
+            row[1] for row in crash_ordered  # row[1] == domain
         )
         fix_domain_counts = Counter(
             (dom, lines_per_file.get(p, 1))
@@ -181,9 +190,9 @@ def compute_cross_layer(
         # top 5 classified frames; fall back to the first classified
         # frame (inline or not) if no non-inline frame is available (A5).
         domain_frames = [
-            (ln, lv, is_inline)
-            for _, dom, ln, lv, is_inline in crash_ordered
-            if dom == domain_name
+            (row[2], row[3], row[4])  # (layer_name, layer_level, is_inline)
+            for row in crash_ordered
+            if row[1] == domain_name
         ]
         primary_crash = None
         for ln, lv, is_inline in domain_frames[:5]:
