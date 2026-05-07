@@ -174,6 +174,84 @@ def load_patch_diffs(
     return out
 
 
+SYZBOT_BASE = "https://syzkaller.appspot.com"
+
+
+def _abs_syzbot(link: str | None) -> str:
+    """Resolve a syzbot link.
+
+    Syzbot returns absolute URLs unchanged and root-relative paths
+    (e.g. ``/text?tag=CrashReport&x=...``) prefixed with the public
+    syzkaller host. Empty or non-string inputs yield ``""``.
+    """
+    if not link or not isinstance(link, str):
+        return ""
+    if link.startswith("http://") or link.startswith("https://"):
+        return link
+    if link.startswith("/"):
+        return SYZBOT_BASE + link
+    return ""
+
+
+def load_external_links(
+    bug_id: str, processed_dir: Path = DEFAULT_PROCESSED_DIR,
+) -> dict:
+    """Collect outbound links for a bug for manual verification.
+
+    Reads ``processed/<bug_id>.json`` and returns:
+      - ``syzbot_bug``: syzbot bug page URL (always set if bug_id given)
+      - ``crash_report``, ``syz_reproducer``, ``c_reproducer``,
+        ``kernel_config``: absolute URLs or "" if absent
+      - ``fix_commits``: list of {hash_short, link, title} for each fix commit
+    """
+    out: dict = {
+        "syzbot_bug": (
+            f"{SYZBOT_BASE}/bug?extid={bug_id}" if bug_id else ""
+        ),
+        "crash_report": "",
+        "syz_reproducer": "",
+        "c_reproducer": "",
+        "kernel_config": "",
+        "fix_commits": [],
+    }
+    if not bug_id:
+        return out
+    path = processed_dir / f"{bug_id}.json"
+    if not path.exists():
+        return out
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return out
+
+    # Pick the first crash that actually has a report; fall back to crashes[0].
+    crashes = data.get("crashes") or []
+    chosen = None
+    for c in crashes:
+        if c.get("crash_report_link"):
+            chosen = c
+            break
+    if chosen is None and crashes:
+        chosen = crashes[0]
+    if chosen:
+        out["crash_report"] = _abs_syzbot(chosen.get("crash_report_link"))
+        out["syz_reproducer"] = _abs_syzbot(chosen.get("syz_reproducer_link"))
+        out["c_reproducer"] = _abs_syzbot(chosen.get("c_reproducer_link"))
+        out["kernel_config"] = _abs_syzbot(chosen.get("kernel_config_link"))
+
+    for fc in data.get("fix_commits") or []:
+        link = fc.get("link") or ""
+        if not link:
+            continue
+        h = fc.get("hash") or ""
+        out["fix_commits"].append({
+            "hash_short": h[:12] if h else "commit",
+            "link": link,
+            "title": fc.get("title") or "",
+        })
+    return out
+
+
 def _classify_for_viz(file: str) -> dict:
     """Classify a fix file path. Returns viz-friendly dict."""
     cls = classify_file_layer(file)
@@ -246,6 +324,7 @@ def build_bug_view(
         "headline": headline,
         "crash_frames": crash_frames,
         "fix_files": fix_files,
+        "links": load_external_links(record.get("bug_id", ""), processed_dir),
         "raw": record,  # kept for the data-dump panel
     }
 
@@ -323,6 +402,23 @@ _CSS = """
   .diff-hunk { background: #f1f8ff; color: #032f62; display: block; font-weight: 600; }
   .diff-meta { color: var(--muted); display: block; }
   .diff-ctx  { display: block; }
+  .linkbar { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px;
+             align-items: center; }
+  .linkbar .lk-label { font-size: 11px; color: var(--muted);
+                       text-transform: uppercase; letter-spacing: .04em;
+                       margin-right: 2px; }
+  .linkbar a.lk { display: inline-flex; align-items: center; gap: 4px;
+                  padding: 3px 9px; border-radius: 12px; font-size: 11px;
+                  font-weight: 500; text-decoration: none;
+                  background: #eef3ff; color: #1d3a8a;
+                  border: 1px solid #d8e0f5; }
+  .linkbar a.lk:hover { background: #dbe5ff; }
+  .linkbar a.lk.lk-syzbot { background: #fff1d8; color: #6b4500;
+                            border-color: #f3dfb1; }
+  .linkbar a.lk.lk-commit { background: #e6ffed; color: #0a5c1f;
+                            border-color: #c4e9cf; }
+  .linkbar a.lk.lk-commit code { font-family: ui-monospace, monospace;
+                                  font-size: 10.5px; }
 """
 
 
@@ -499,6 +595,63 @@ def _render_fix(fix: dict) -> str:
     )
 
 
+def _render_link_bar(links: dict) -> str:
+    """Render outbound verification chips for a bug. Empty if no links."""
+    if not links:
+        return ""
+    chips: list[str] = []
+
+    def _chip(href: str, label: str, klass: str = "lk", title: str = "") -> str:
+        title_attr = f' title="{_esc(title)}"' if title else ""
+        return (
+            f'<a class="{klass}" href="{_esc(href)}" '
+            f'target="_blank" rel="noopener noreferrer"{title_attr}>'
+            f'{_esc(label)}</a>'
+        )
+
+    if links.get("syzbot_bug"):
+        chips.append(_chip(
+            links["syzbot_bug"], "syzbot", "lk lk-syzbot",
+            "open the syzbot bug page",
+        ))
+    if links.get("crash_report"):
+        chips.append(_chip(
+            links["crash_report"], "crash report", "lk",
+            "open the KASAN/crash report on syzkaller.appspot.com",
+        ))
+    if links.get("syz_reproducer"):
+        chips.append(_chip(
+            links["syz_reproducer"], "syz repro", "lk",
+            "open the syzkaller reproducer",
+        ))
+    if links.get("c_reproducer"):
+        chips.append(_chip(
+            links["c_reproducer"], "C repro", "lk",
+            "open the C reproducer",
+        ))
+    if links.get("kernel_config"):
+        chips.append(_chip(
+            links["kernel_config"], "config", "lk",
+            "open the kernel .config",
+        ))
+    for fc in links.get("fix_commits") or []:
+        if not fc.get("link"):
+            continue
+        label = f'commit {fc["hash_short"]}'
+        chips.append(_chip(
+            fc["link"], label, "lk lk-commit",
+            fc.get("title") or "open the upstream fix commit",
+        ))
+    if not chips:
+        return ""
+    return (
+        '<div class="linkbar">'
+        '<span class="lk-label">verify:</span>'
+        + "".join(chips) +
+        '</div>'
+    )
+
+
 def render_html(view: dict, taxonomy: list[dict]) -> str:
     h = view["headline"]
     relation = h.get("relation") or "unknown"
@@ -545,6 +698,7 @@ def render_html(view: dict, taxonomy: list[dict]) -> str:
 <div class="meta">
   bug <b>{_esc(view['bug_id'])}</b> · {rel_pill}{cross_dom_html}{direction_html}{stack_html}{layer_html}
 </div>
+{_render_link_bar(view.get('links') or {})}
 
 <div class="grid">
 
@@ -581,6 +735,24 @@ def render_index(views: list[dict], hrefs: list[str]) -> str:
     for v, href in zip(views, hrefs):
         h = v["headline"]
         rel = h.get("relation") or "unknown"
+        links = v.get("links") or {}
+        ext_cells = []
+        if links.get("syzbot_bug"):
+            ext_cells.append(
+                f'<a href="{_esc(links["syzbot_bug"])}" '
+                f'target="_blank" rel="noopener noreferrer" '
+                f'title="open the syzbot bug page">syzbot</a>'
+            )
+        fix_commits = links.get("fix_commits") or []
+        if fix_commits and fix_commits[0].get("link"):
+            fc = fix_commits[0]
+            ext_cells.append(
+                f'<a href="{_esc(fc["link"])}" '
+                f'target="_blank" rel="noopener noreferrer" '
+                f'title="{_esc(fc.get("title") or "")}">'
+                f'commit&nbsp;<code>{_esc(fc["hash_short"])}</code></a>'
+            )
+        ext_html = " · ".join(ext_cells) if ext_cells else ""
         rows.append(
             f'<tr>'
             f'  <td><a href="{_esc(href)}">{_esc(v["bug_id"])}</a></td>'
@@ -590,6 +762,7 @@ def render_index(views: list[dict], hrefs: list[str]) -> str:
             f'  <td>{_esc(h.get("fix_layer") or "")}</td>'
             f'  <td>{_esc(h.get("direction") or "")}</td>'
             f'  <td class="path">{_esc(v.get("title", ""))}</td>'
+            f'  <td class="ext">{ext_html}</td>'
             f'</tr>'
         )
     return f"""<!DOCTYPE html>
@@ -598,12 +771,16 @@ def render_index(views: list[dict], hrefs: list[str]) -> str:
 table {{ border-collapse: collapse; width: 100%; background: #fff; }}
 td, th {{ border-bottom: 1px solid var(--line); padding: 6px 8px; text-align: left; font-size: 13px; }}
 th {{ font-size: 12px; text-transform: uppercase; color: var(--muted); }}
+td.ext {{ white-space: nowrap; font-size: 12px; }}
+td.ext a {{ color: #1d3a8a; text-decoration: none; }}
+td.ext a:hover {{ text-decoration: underline; }}
+td.ext code {{ font-family: ui-monospace, monospace; font-size: 11px; color: #0a5c1f; }}
 </style></head>
 <body>
 <h1>SyzFix layer visualizer · {len(views)} bugs</h1>
 <div class="meta">click a bug_id to open its layered view</div>
 <table>
-<tr><th>bug_id</th><th>relation</th><th>domain</th><th>crash layer</th><th>fix layer</th><th>direction</th><th>title</th></tr>
+<tr><th>bug_id</th><th>relation</th><th>domain</th><th>crash layer</th><th>fix layer</th><th>direction</th><th>title</th><th>verify</th></tr>
 {"".join(rows)}
 </table>
 </body></html>
