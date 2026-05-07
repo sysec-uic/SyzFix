@@ -18,22 +18,53 @@ Live numbers from the persisted analyzer output
 
 | Relation | Count | % | Definition |
 |---|---|---|---|
-| **same_layer** | 4,022 | 79.4% | Crash and fix in the same architectural layer of the same domain |
-| **cross_layer** | 580 | 11.4% | Crash and fix in *different* layers within a *shared* domain |
+| **same_layer** | 4,028 | 79.5% | Crash and fix in the same architectural layer of the same domain |
+| **cross_layer** | 574 | 11.3% | Crash and fix in *different* layers within a *shared* domain |
 | **cross_domain** | 465 | 9.2% | Crash and fix have *no shared domain* — disjoint subsystems |
 | **(skipped)** | — | — | Missing stack trace or patch diff |
 | **Total analyzed** | **5,067** | | |
 
-Within the 580 `cross_layer` bugs, `stack_overlap` records whether *any* patched
+Within the 574 `cross_layer` bugs, `stack_overlap` records whether *any* patched
 file appears on the crash stack:
 
 | Sub-category | Count | % of cross_layer | Meaning |
 |---|---|---|---|
-| Fix **ON** crash stack | 364 | 62.8% | Stack trace points at the fix file — stack-following helps |
-| Fix **OFF** crash stack | 216 | 37.2% | Architectural reasoning required — stack-following misleads |
+| Fix **ON** crash stack | 359 | 62.5% | Stack trace points at the fix file — stack-following helps |
+| Fix **OFF** crash stack | 215 | 37.5% | Architectural reasoning required — stack-following misleads |
 
-The **216 cross-layer + off-stack bugs** plus the **465 cross-domain bugs** are the
+The **215 cross-layer + off-stack bugs** plus the **465 cross-domain bugs** are the
 hardest cases for stack-following heuristics.
+
+### Patch-internal layer span (`fix_internal_layers`)
+
+Each record also carries `fix_internal_layers` — a per-`(domain, layer)` summary
+of every file the patch touches, with file count and changed-line count.
+Captures cases where the patch *itself* spans layers, which the relation flag
+alone misses (`cross_domain` short-circuits before any layer comparison;
+`same_layer` collapses to a single primary layer).
+
+| | Count | % of total |
+|---|---:|---:|
+| records with field populated | 4,904 | 96.8% |
+| patches that internally span ≥2 distinct (domain, layer) pairs | **216** | **4.3%** |
+
+The 216 multi-layer patches are the high-value pattern for contract mining
+(e.g. *“fix a TLS-via-sockmap bug ⇒ add a hook in `net/core/skmsg.c` (L0) and
+wire it into `net/ipv4/tcp_ulp.c` and `net/tls/tls_main.c` (L1) in the same
+patch”*).
+
+### Infrastructure-frame filter
+
+`is_infrastructure_file()` in `kernel_layers.py` flags crash-reporter machinery —
+`kernel/panic.c`, `mm/kasan/`, `lib/dump_stack*`, `include/linux/list.h` and
+friends, `arch/*/kernel/{traps,dumpstack,process}.c` — as helpers rather than
+buggy subsystem code. The cross-layer analyzer's `primary_crash` picker skips
+them in pass 1, falling back to plain non-inline frames in pass 2. Frames are
+still classified into their real `(domain, layer)` so shared-domain detection
+and counts stay stable, but they no longer get *picked as primary*. This flips
+6 borderline records from `cross_layer` to `same_layer` (the 580→574 delta
+above) — they were previously mis-labelled because `panic.c` happened to be
+the first non-inline `kernel`-domain frame.
 
 ## Kernel-layer taxonomy
 
@@ -90,17 +121,18 @@ define the "expected" layer set that the fix must avoid:
 
 | relax_window | strict=stack | strict=layer | strict=combined |
 |---|---:|---:|---:|
-| 1 | 1,038 | 1,045 | 569 |
-| 2 | 1,038 | 860 | 540 |
-| 3 | 1,038 | 759 | 516 |
-| all | 1,038 | 700 | 500 |
+| 1 | 1,038 | 1,039 | 568 |
+| 2 | 1,038 | 854 | 539 |
+| 3 | 1,038 | 756 | 515 |
+| all | 1,038 | 697 | 499 |
 
-Cross-layer prevalence ranges from **9.9 %** (combined-strict, relax-all) to
-**23.6 %** (stack-strict) depending on operational definition — a >2× swing,
-which is why the picker matters. The historic `is_cross_layer == True` flag
-is exactly `--strict layer --relax-window 1` *minus the cross-domain bugs*
-(465); cross-domain bugs are layer-positive under any layer mode by construction
-(no shared domain ⇒ no shared layer).
+Cross-layer prevalence ranges from **9.8 %** (combined-strict, relax-all) to
+**20.5 %** (stack-strict) depending on operational definition — roughly a
+2× swing, which is why the picker matters. The historic `is_cross_layer == True`
+flag equals `--strict layer --relax-window 1` *minus the cross-domain bugs*
+(`1,039 − 465 = 574`, matching the `cross_layer` row above); cross-domain bugs
+are layer-positive under any layer mode by construction (no shared domain ⇒
+no shared layer).
 
 Cross-domain bugs are uniformly positive under `--strict layer`; you can include
 or exclude them via `--relation {cross_layer|cross_domain|same_layer|any}`.
@@ -154,6 +186,28 @@ Flags:
 - `--compare` — print 4×3 grid (no per-record output).
 - `--save` — persist the labelled subset.
 - `--top-examples N` — number of example positives to print (default 10).
+- `--export-flat [PATH]` — write a flat CSV with one row per bug
+  (`bug_id, title, relation, direction, stack_overlap, crash/fix layer,
+  fix_files, crash_top_files, fix_internal_layers, fix_internal_layer_count`,
+  plus yes/no labels and reason strings under all four canonical modes).
+  Default path: `analysis/results/cross-layer_analysis/contract_ready.csv`.
+  Used by downstream contract miners and Codex evaluation harnesses so
+  they don't have to re-classify every bug themselves.
+
+### Single-bug audit (decision trace)
+
+```bash
+# Print classifier intermediate state for one bug
+python -m analysis.audit_cross_layer --bug-id 38769495e847cea2dcca
+```
+
+Shows the same data the analyzer used: crash domain breakdown, the
+`primary_crash` selection replay (with skipped *inline* and
+*infrastructure* frames marked), the `primary_fix` lines-weighted choice,
+and the verdict under each cell of the canonical mode grid. Complements
+the per-bug visualizer (`viz/<bug_id>.html`): viz is for visual
+inspection, this is for tracing the decision path during case-study
+selection or contract labelling.
 
 ### Per-bug layer visualizer
 
@@ -183,10 +237,23 @@ Same-hue + different brightness ⇒ within-domain layer mismatch (cross-layer);
 different hue ⇒ different domain (cross-domain); identical chip on every line ⇒
 same-layer.
 
+Each per-bug HTML also carries:
+
+- a **verify** link bar — chips that open the syzbot bug page, the KASAN
+  crash report, the syz/C reproducers, the kernel `.config`, and every
+  fix commit on `git.kernel.org`, so a human can click through and
+  confirm that the crash and patch correspond before trusting the label
+- a **modes** bar — yes/no chips for `combined×1`, `layer×1`, `layer×all`,
+  `stack×1`, with the reason string in the tooltip
+- a **fix spans** line — one chip per `(domain, layer)` the patch
+  touches, highlighted when the patch internally crosses layers (the
+  216 high-value contract candidates in §"Patch-internal layer span")
+
 The taxonomy panel shows every path prefix in the layer (no truncation), with
 catch-all regex patterns rendered as purple-tinted chips so they are visually
 distinct from explicit prefixes. Open any per-bug `.html` file with `file://`
-in a browser — no server needed.
+in a browser — no server needed (the verify chips link out, but the page
+itself is fully self-contained).
 
 ### Patch-location predictor (uses the modes)
 
