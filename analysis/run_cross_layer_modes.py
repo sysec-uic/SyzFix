@@ -24,6 +24,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import sys
 from collections import Counter, defaultdict
@@ -40,6 +41,20 @@ DEFAULT_RESULT = (
 DEFAULT_BY_MODE_DIR = (
     PROJECT_ROOT / "analysis" / "results" / "cross-layer_analysis" / "by_mode"
 )
+DEFAULT_FLAT_CSV = (
+    PROJECT_ROOT / "analysis" / "results" / "cross-layer_analysis"
+    / "contract_ready.csv"
+)
+
+# Canonical mode columns emitted by --export-flat. The first is the
+# default in docs/cross_layer.md; the others map to the strict/layer/all
+# and stack-only operational definitions discussed in the same doc.
+FLAT_MODES: list[tuple[str, str, int | str]] = [
+    ("mode_strict_combined_relax_1",  "combined", 1),
+    ("mode_strict_layer_relax_1",     "layer",    1),
+    ("mode_strict_layer_relax_all",   "layer",    "all"),
+    ("mode_strict_stack_relax_1",     "stack",    1),
+]
 
 STRICT_CHOICES = ("stack", "layer", "combined", "off")
 DIRECTION_CHOICES = ("fix_in_upper_layer", "fix_in_lower_layer", "any")
@@ -203,6 +218,80 @@ def _print_compare(details: list[dict], *, direction: str, domain: str) -> None:
     print(f"Filters: direction={direction}, domain={domain}")
 
 
+def _flat_row(record: dict) -> dict:
+    """Build one flat CSV row for a bug, with canonical mode labels."""
+    fix_internal = record.get("fix_internal_layers") or []
+    internal_tokens = [
+        f"{il['domain']}:L{il['layer_level']}" for il in fix_internal
+    ]
+    distinct_keys = {
+        (il["domain"], il["layer_level"]) for il in fix_internal
+    }
+
+    fix_files = (
+        (record.get("fix_on_stack_files") or [])
+        + (record.get("fix_off_stack_files") or [])
+    )
+    crash_top_files: list[str] = []
+    seen = set()
+    for f in record.get("crash_layers_top_n") or []:
+        path = f.get("file") or ""
+        if path and path not in seen:
+            seen.add(path)
+            crash_top_files.append(path)
+        if len(crash_top_files) >= 5:
+            break
+
+    domain = record.get("domain") or record.get("fix_domain") or ""
+    crash_domain = record.get("crash_domain") or domain
+    fix_domain = record.get("fix_domain") or domain
+
+    row = {
+        "bug_id": record.get("bug_id", ""),
+        "title": record.get("title", ""),
+        "relation": record.get("relation", ""),
+        "direction": record.get("direction", ""),
+        "stack_overlap": record.get("stack_overlap", ""),
+        "crash_domain": crash_domain,
+        "crash_layer": record.get("crash_layer", ""),
+        "fix_domain": fix_domain,
+        "fix_layer": record.get("fix_layer", ""),
+        "fix_files": ";".join(fix_files),
+        "crash_top_files": ";".join(crash_top_files),
+        "fix_internal_layers": ";".join(internal_tokens),
+        "fix_internal_layer_count": len(distinct_keys),
+    }
+    for col, strict, window in FLAT_MODES:
+        v = classify_under_mode(record, strict=strict, relax_window=window)
+        row[col] = "1" if v["label"] else "0"
+        row[f"{col}_reason"] = v["reason"]
+    return row
+
+
+def export_flat_csv(details: list[dict], out_path: Path) -> int:
+    """Write one row per bug with all canonical mode labels.
+
+    Returns the number of rows written.
+    """
+    rows = [_flat_row(r) for r in details]
+    fieldnames = [
+        "bug_id", "title", "relation", "direction", "stack_overlap",
+        "crash_domain", "crash_layer", "fix_domain", "fix_layer",
+        "fix_files", "crash_top_files",
+        "fix_internal_layers", "fix_internal_layer_count",
+    ]
+    for col, _, _ in FLAT_MODES:
+        fieldnames.append(col)
+        fieldnames.append(f"{col}_reason")
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return len(rows)
+
+
 def _load_details(path: Path) -> list[dict]:
     if not path.exists():
         sys.exit(
@@ -256,9 +345,32 @@ def main() -> None:
         "--top-examples", type=int, default=10,
         help="Number of example positives to print (default: 10)",
     )
+    ap.add_argument(
+        "--export-flat",
+        nargs="?",
+        const=str(DEFAULT_FLAT_CSV),
+        default=None,
+        metavar="PATH",
+        help=(
+            "Write a flat CSV with one row per bug and labels under the "
+            "canonical (strict, relax) modes — for downstream contract "
+            "miners and Codex evaluation. Optional PATH overrides "
+            f"{DEFAULT_FLAT_CSV}. Ignores --strict/--relax/--domain/etc."
+        ),
+    )
     args = ap.parse_args()
 
     details = _load_details(args.input)
+
+    if args.export_flat is not None:
+        out = Path(args.export_flat)
+        n = export_flat_csv(details, out)
+        size = out.stat().st_size
+        print(
+            f"[run_cross_layer_modes] wrote {n} rows to {out} "
+            f"({size:,} bytes)"
+        )
+        return
 
     if args.compare:
         _print_compare(details, direction=args.direction, domain=args.domain)
