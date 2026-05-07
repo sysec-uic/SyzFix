@@ -511,6 +511,62 @@ def classify_file_layer(
     return None
 
 
+# ─── Infrastructure / reporter / helper paths ──────────────────────────────
+#
+# Files that show up on KASAN crash stacks as observers of corruption rather
+# than authors of it: KASAN reporter, panic, dump_stack, generic list helpers,
+# arch traps. They still classify into a real (domain, layer) so that
+# cross_layer counts and shared-domain detection remain stable, but the
+# primary-crash picker in `cross_layer.py` should skip them in favour of the
+# next real (non-infra, non-inline) frame.
+#
+# The audit in `analysis/audit_cross_layer.py --bug-id` showed ~23 records
+# (mostly cross_layer with `kernel/panic.c` chosen as primary) where this
+# matters; without filtering they create artificial cross-layer signal.
+_INFRA_PREFIXES: tuple[str, ...] = (
+    "mm/kasan/",
+    "kernel/printk/",
+    "lib/dump_stack",
+    "lib/stackdepot",
+)
+_INFRA_FILES: frozenset[str] = frozenset({
+    "include/linux/list.h",
+    "include/linux/list_bl.h",
+    "include/linux/rculist.h",
+    "include/linux/llist.h",
+    "include/linux/list_lru.h",
+    "include/linux/instrumented.h",
+    "kernel/panic.c",
+    "kernel/printk.c",
+})
+_INFRA_REGEXES: tuple[re.Pattern, ...] = (
+    re.compile(r"^arch/[a-z0-9_]+/kernel/dumpstack(\.c)?$"),
+    re.compile(r"^arch/[a-z0-9_]+/kernel/traps(\.c)?$"),
+    re.compile(r"^arch/[a-z0-9_]+/kernel/process(\.c)?$"),
+    re.compile(r"^arch/[a-z0-9_]+/include/asm/idtentry\.h$"),
+)
+
+
+def is_infrastructure_file(path: str) -> bool:
+    """True if `path` is a panic/KASAN/list/trap helper, not real subsystem code.
+
+    Used by the cross-layer analyzer's primary-crash selection to skip past
+    crash-reporter machinery and pick the first frame in real subsystem code.
+    Does NOT change classification (domain, layer) — the file still belongs
+    to its existing layer for shared-domain and cross-layer counting.
+    """
+    if not path:
+        return False
+    if path in _INFRA_FILES:
+        return True
+    if path.startswith(_INFRA_PREFIXES):
+        return True
+    for pat in _INFRA_REGEXES:
+        if pat.search(path):
+            return True
+    return False
+
+
 def classify_files(paths: list[str]) -> dict[str, list[tuple[str, str, int]]]:
     """Classify multiple files, grouped by domain.
 

@@ -17,6 +17,7 @@ from ..filters import parse_stack_trace
 from .base import BaseAnalyzer, AnalysisResult
 from .kernel_layers import (
     classify_file_layer, classify_files, get_layer_label, DOMAINS,
+    is_infrastructure_file,
 )
 
 
@@ -98,13 +99,14 @@ def compute_cross_layer(
     #               function, line). Function and line are kept alongside
     #               the layer info so the visualizer can render call-stack
     #               provenance without re-parsing the crash report.
-    crash_ordered: list[tuple[str, str, str, int, bool, str, int]] = []
+    crash_ordered: list[tuple[str, str, str, int, bool, str, int, bool]] = []
     for frame in crash_frames_with_file:
         result = classify_file_layer(frame.file)
         if result:
             crash_ordered.append((
                 frame.file, result[0], result[1], result[2], frame.is_inline,
                 frame.function or "", int(frame.line or 0),
+                is_infrastructure_file(frame.file),
             ))
 
     # Compact per-frame layer record for downstream relax-window classifiers.
@@ -119,15 +121,39 @@ def compute_cross_layer(
             "is_inline": is_inline,
             "function": function,
             "line": line,
+            "is_infrastructure": is_infra,
         }
         for idx, (
-            file, dom, ln, lv, is_inline, function, line
+            file, dom, ln, lv, is_inline, function, line, is_infra
         ) in enumerate(crash_ordered[:10])
     ]
 
     # Per-file changed-line counts — used as tie-break weights for the
     # primary fix layer (A2).
     lines_per_file = _lines_changed_per_file(patch_diff)
+
+    # Aggregate per-(domain, layer) summary across all patched files. Captures
+    # cases where the patch itself spans layers internally (e.g. net/core L0
+    # plus net/ipv4 L1 in one fix), which the relation flag alone misses
+    # because cross_domain short-circuits before any layer comparison and
+    # same_layer collapses to a single primary layer.
+    layer_acc: dict[tuple[str, str, int], dict] = {}
+    for dom, entries in fix_by_domain.items():
+        for p, ln, lv in entries:
+            key = (dom, ln, lv)
+            slot = layer_acc.setdefault(key, {
+                "domain": dom,
+                "layer_name": ln,
+                "layer_level": lv,
+                "files": [],
+                "lines_changed": 0,
+            })
+            slot["files"].append(p)
+            slot["lines_changed"] += max(lines_per_file.get(p, 1), 1)
+    fix_internal_layers = sorted(
+        layer_acc.values(),
+        key=lambda s: (s["domain"], s["layer_level"], s["layer_name"]),
+    )
 
     # Find domains present in both crash and fix
     shared_domains = set(crash_by_domain.keys()) & set(fix_by_domain.keys())
@@ -172,6 +198,7 @@ def compute_cross_layer(
             "crash_domain": crash_domain,
             "fix_domain": fix_domain,
             "crash_layers_top_n": crash_layers_top_n,
+            "fix_internal_layers": fix_internal_layers,
         }
 
     # Check each shared domain for layer level differences.
@@ -186,19 +213,30 @@ def compute_cross_layer(
 
         # Determine the crash layer from the TOP of the stack trace
         # (where the bug actually manifests), not the majority of frames.
-        # Prefer the first *non-inline* frame in this domain within the
-        # top 5 classified frames; fall back to the first classified
-        # frame (inline or not) if no non-inline frame is available (A5).
+        # Preference order within the top 5 classified frames in this domain:
+        #   1. non-inline AND not infrastructure (real subsystem code)
+        #   2. non-inline (might be a helper but at least a real frame)
+        #   3. fall back to the first classified frame (inline or not)
+        # Skipping infrastructure frames (panic, KASAN, list helpers, traps)
+        # avoids picking the crash *reporter* as the primary frame and then
+        # mislabelling the bug as cross_layer because panic.c happens to be
+        # at a different layer than the fix.
         domain_frames = [
-            (row[2], row[3], row[4])  # (layer_name, layer_level, is_inline)
+            (row[2], row[3], row[4], row[7])
+            # (layer_name, layer_level, is_inline, is_infrastructure)
             for row in crash_ordered
             if row[1] == domain_name
         ]
         primary_crash = None
-        for ln, lv, is_inline in domain_frames[:5]:
-            if not is_inline:
+        for ln, lv, is_inline, is_infra in domain_frames[:5]:
+            if not is_inline and not is_infra:
                 primary_crash = (ln, lv)
                 break
+        if primary_crash is None:
+            for ln, lv, is_inline, _is_infra in domain_frames[:5]:
+                if not is_inline:
+                    primary_crash = (ln, lv)
+                    break
         if primary_crash is None and domain_frames:
             primary_crash = (domain_frames[0][0], domain_frames[0][1])
         if primary_crash is None:
@@ -219,7 +257,7 @@ def compute_cross_layer(
         top_weight = max(fix_layer_weights.values())
         top_layers = [k for k, w in fix_layer_weights.items() if w == top_weight]
         if len(top_layers) > 1:
-            crash_layer_set = {(ln, lv) for ln, lv, _ in domain_frames}
+            crash_layer_set = {(ln, lv) for ln, lv, _, _ in domain_frames}
             preferred = [k for k in top_layers if k in crash_layer_set]
             primary_fix = preferred[0] if preferred else top_layers[0]
         else:
@@ -262,6 +300,7 @@ def compute_cross_layer(
             "fix_files": fix_files,
             "shared_domains": sorted(shared_domains),
             "crash_layers_top_n": crash_layers_top_n,
+            "fix_internal_layers": fix_internal_layers,
         }
 
     # Use the first (most important) finding as primary
@@ -283,6 +322,7 @@ def compute_cross_layer(
         "crash_files": crash_files[:5],
         "fix_files": fix_files,
         "crash_layers_top_n": crash_layers_top_n,
+        "fix_internal_layers": fix_internal_layers,
     }
 
 
@@ -461,6 +501,8 @@ class CrossLayerAnalyzer(BaseAnalyzer):
                     "fix_off_stack_files": result.get("fix_off_stack_files", []),
                     "crash_layers_top_n": result.get("crash_layers_top_n", []),
                     "shared_domains": result.get("shared_domains", []),
+                    "fix_internal_layers":
+                        result.get("fix_internal_layers", []),
                 }
                 if relation == "cross_domain":
                     detail_record["crash_domain"] = result.get("crash_domain", "")
@@ -496,6 +538,8 @@ class CrossLayerAnalyzer(BaseAnalyzer):
                 "fix_on_stack_files": result.get("fix_on_stack_files", []),
                 "fix_off_stack_files": result.get("fix_off_stack_files", []),
                 "crash_layers_top_n": result.get("crash_layers_top_n", []),
+                "fix_internal_layers":
+                    result.get("fix_internal_layers", []),
             }
             details.append(detail)
 
