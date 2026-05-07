@@ -40,6 +40,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from analysis.analyzers.kernel_layers import (
     DOMAINS, classify_file_layer,
 )
+from analysis.analyzers.cross_layer import (
+    classify_under_mode, compute_cross_layer,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_INPUT = (
@@ -318,12 +321,59 @@ def build_bug_view(
         "stack_overlap": record.get("stack_overlap", ""),
     }
 
+    # Backfill `fix_internal_layers` for analyzer outputs generated before
+    # the field was added — recompute on-the-fly from the processed JSON.
+    fix_internal_layers = record.get("fix_internal_layers")
+    if not fix_internal_layers:
+        bug_id = record.get("bug_id", "")
+        path = processed_dir / f"{bug_id}.json"
+        if bug_id and path.exists():
+            try:
+                data = json.loads(path.read_text())
+                crash_text = (
+                    (data.get("crashes") or [{}])[0].get("crash_report") or ""
+                )
+                diff_text = "\n".join(
+                    (fc.get("patch_diff") or "")
+                    for fc in (data.get("fix_commits") or [])
+                )
+                recomputed = compute_cross_layer(crash_text, diff_text)
+                if recomputed:
+                    fix_internal_layers = (
+                        recomputed.get("fix_internal_layers") or []
+                    )
+            except (OSError, json.JSONDecodeError):
+                fix_internal_layers = []
+    fix_internal_layers = fix_internal_layers or []
+
+    # Mode-aware verdicts under the four canonical operational definitions.
+    # Order matches docs/cross_layer.md: the default appears first.
+    mode_specs = [
+        ("combined", 1, "default"),
+        ("layer", 1, "layer-only"),
+        ("layer", "all", "layer relax=all"),
+        ("stack", 1, "stack-only"),
+    ]
+    mode_verdicts = []
+    for strict, window, label in mode_specs:
+        v = classify_under_mode(record, strict=strict, relax_window=window)
+        mode_verdicts.append({
+            "strict": strict,
+            "relax_window": window,
+            "label_text": label,
+            "label": v["label"],
+            "reason": v["reason"],
+            "mode": v["mode"],
+        })
+
     return {
         "bug_id": record.get("bug_id"),
         "title": record.get("title", ""),
         "headline": headline,
         "crash_frames": crash_frames,
         "fix_files": fix_files,
+        "fix_internal_layers": fix_internal_layers,
+        "mode_verdicts": mode_verdicts,
         "links": load_external_links(record.get("bug_id", ""), processed_dir),
         "raw": record,  # kept for the data-dump panel
     }
@@ -419,6 +469,23 @@ _CSS = """
                             border-color: #c4e9cf; }
   .linkbar a.lk.lk-commit code { font-family: ui-monospace, monospace;
                                   font-size: 10.5px; }
+  .modebar { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px;
+             align-items: center; }
+  .modebar .mb-label { font-size: 11px; color: var(--muted);
+                       text-transform: uppercase; letter-spacing: .04em; }
+  .modebar .mode { padding: 2px 8px; border-radius: 10px; font-size: 11px;
+                   font-weight: 500; border: 1px solid #ddd; cursor: help; }
+  .modebar .mode.pos { background: #fff1d8; color: #6b4500;
+                       border-color: #f3dfb1; }
+  .modebar .mode.neg { background: #eef0f4; color: #4a4a4a; }
+  .modebar .mode b { font-family: ui-monospace, monospace; font-size: 10.5px;
+                     font-weight: 600; }
+  .span-bar { margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .span-bar .span-chip { display: inline-block; padding: 2px 8px;
+                          border-radius: 10px; font-size: 11px; font-weight: 500;
+                          margin-left: 4px; border: 1px solid #ddd; }
+  .span-bar .span-warn { background: #fff1d8; color: #6b4500;
+                         border-color: #f3dfb1; }
 """
 
 
@@ -652,6 +719,54 @@ def _render_link_bar(links: dict) -> str:
     )
 
 
+def _render_mode_bar(verdicts: list[dict]) -> str:
+    """Render mode-aware verdicts (combined+1, layer+1, layer+all, stack)."""
+    if not verdicts:
+        return ""
+    chips = []
+    for v in verdicts:
+        klass = "mode pos" if v["label"] else "mode neg"
+        sign = "+" if v["label"] else "−"
+        title = (
+            f'mode={v["mode"]}\nlabel='
+            f'{"positive" if v["label"] else "negative"}\n'
+            f'reason={v["reason"]}'
+        )
+        chips.append(
+            f'<span class="{klass}" title="{_esc(title)}">{sign}&nbsp;'
+            f'<b>{_esc(v["label_text"])}</b></span>'
+        )
+    return (
+        '<div class="modebar">'
+        '<span class="mb-label">modes:</span>'
+        + "".join(chips) +
+        '</div>'
+    )
+
+
+def _render_span_bar(internal: list[dict]) -> str:
+    """Render a one-line summary of fix_internal_layers."""
+    if not internal:
+        return ""
+    pieces = []
+    distinct_keys = set()
+    for il in internal:
+        distinct_keys.add((il["domain"], il["layer_level"]))
+        pieces.append(
+            f'<span class="span-chip">'
+            f'{_esc(il["domain"])}·L{il["layer_level"]}·'
+            f'{_esc(il["layer_name"])} '
+            f'<small>({il["lines_changed"]}L, {len(il["files"])}f)</small>'
+            f'</span>'
+        )
+    multi = len(distinct_keys) > 1
+    label = "fix spans" + (" <b>multiple layers</b>" if multi else "")
+    if multi:
+        # Highlight the chips when the patch itself crosses layer boundaries.
+        pieces = [p.replace('span-chip', 'span-chip span-warn') for p in pieces]
+    return f'<div class="span-bar">{label}:{"".join(pieces)}</div>'
+
+
 def render_html(view: dict, taxonomy: list[dict]) -> str:
     h = view["headline"]
     relation = h.get("relation") or "unknown"
@@ -699,6 +814,8 @@ def render_html(view: dict, taxonomy: list[dict]) -> str:
   bug <b>{_esc(view['bug_id'])}</b> · {rel_pill}{cross_dom_html}{direction_html}{stack_html}{layer_html}
 </div>
 {_render_link_bar(view.get('links') or {})}
+{_render_mode_bar(view.get('mode_verdicts') or [])}
+{_render_span_bar(view.get('fix_internal_layers') or [])}
 
 <div class="grid">
 
