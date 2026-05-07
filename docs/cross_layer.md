@@ -302,6 +302,147 @@ python -m dataset.view list --cross-layer
 python -m dataset.view crosslayer <bug_id>
 ```
 
+## Layer predictor
+
+Beyond classifying historical fixes, we want to *predict* the (domain, layer)
+where a fix should land for a brand-new crash report — and use that as a
+prior for the file locator. The predictor lives in `memory/cross_layer/`
+and ships in two phases:
+
+| Phase | Implementation | Status |
+|---|---|---|
+| **Phase 1** | retrieval voter (FAISS kNN over crash embeddings + per-domain crash-layer anchor); no training, CPU-only | shipped — commit `ffeda2c` |
+| **Phase 2** | trained encoder + hierarchical (domain → layer) classification head; bge-base-en-v1.5 backbone + linear head; same_layer used as majority-class supervision | pending — needs GPU box |
+
+Long-form plan & design decisions:
+[`~/.claude/plans/layer-prediction-from-same-layer-supervision.md`](
+  ~/.claude/plans/layer-prediction-from-same-layer-supervision.md)
+(memory/cross-layer paths, ML defaults, acceptance thresholds, GPU/CPU split,
+rationale-generation strategy).
+
+### Phase 1 baseline numbers
+
+Balanced 337-bug eval+train sample, prior_weight=0.5, k=20 neighbours:
+
+| Stratum | n | top-1 | top-3 |
+|---|---:|---:|---:|
+| **all** | 337 | 57.9 % | 79.8 % |
+| same_layer | 299 | 59.2 % | 79.9 % |
+| cross_layer | 34 | 50.0 % | 79.4 % |
+| cross_domain | 4 | 25.0 % | 75.0 % |
+
+Top-3 is already ≈ 80 %, so the right layer is usually in the candidate
+set; the trained head's job is to push **top-1** from ≈ 58 % to the
+paper-quality target (same_layer ≥ 95 %, cross_layer ≥ 55 %, cross_domain
+≥ 30 %, weighted ≥ 80 %).
+
+### Reproducing Phase 1 on a fresh CPU box
+
+Prerequisites — already satisfied on this dev box, but listing them so
+the recipe is portable:
+
+```bash
+# 1. Activate the venv (faiss, transformers, torch CPU, numpy)
+source venv/bin/activate
+python -c "import faiss, torch; print(faiss.__version__, torch.__version__)"
+
+# 2. Make sure the cross-layer analyzer has been re-run since the
+#    fix_internal_layers field was added (commit fb29765). The predictor
+#    reads result.json on every call.
+python -m analysis.run_all --analyzer crosslayer
+
+# 3. Memory FAISS index must exist (built once via `python -m memory.build`).
+ls memory/data/faiss_crash.index memory/data/instance_memory.jsonl
+```
+
+Predict for a single bug from the dataset (with self-exclusion of the
+query from the retrieval pool):
+
+```bash
+# Three canonical bugs spanning all three relations
+python -m memory.cross_layer.predict_layer --bug-id 38769495e847cea2dcca   # same_layer
+python -m memory.cross_layer.predict_layer --bug-id 5b64180f8d9e39d3f061   # cross_layer
+python -m memory.cross_layer.predict_layer --bug-id 037e18398ba8c655a652   # cross_domain
+
+# JSON output for downstream tooling
+python -m memory.cross_layer.predict_layer \
+    --bug-id 5b64180f8d9e39d3f061 --format json --top 3
+
+# Run on a raw KASAN report (or pipe via '-')
+python -m memory.cross_layer.predict_layer --crash crash.txt
+cat crash.txt | python -m memory.cross_layer.predict_layer --crash -
+```
+
+Tunables (all flags optional):
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--top N` | 3 | how many predictions to print |
+| `--k N` | 20 | FAISS neighbours fetched for the vote |
+| `--prior-weight F` | 0.5 | per-domain anchor strength; 0 disables, 1.0+ over-weights the crash side |
+| `--no-self-exclude` | off | keep the query bug in the retrieval pool (debugging only) |
+| `--format {human,json}` | human | output format |
+
+Reproducing the baseline accuracy table above:
+
+```bash
+# Drop this into a file or run inline; ≈3 minutes on CPU for 519 sample IDs.
+python3 - <<'EOF'
+import json, random
+from pathlib import Path
+from memory.cross_layer.predict_layer import (
+    LayerPredictor, _primary_fix_layer_of,
+)
+
+split = json.loads(Path("memory/data/split.json").read_text())
+results = {
+    r["bug_id"]: r
+    for r in json.loads(
+        Path("analysis/results/cross-layer_analysis/result.json").read_text()
+    )["details"]
+    if r.get("bug_id")
+}
+
+# All 219 eval + 300 train samples — drops to ~337 evaluated after
+# filtering empty fix_internal_layers / missing crash reports.
+rng = random.Random(0)
+eval_ids = list(split.get("eval", []))
+train_ids = list(split.get("train", []))
+rng.shuffle(train_ids)
+sample_ids = eval_ids + [b for b in train_ids[:300] if b not in set(eval_ids)]
+
+predictor = LayerPredictor()
+processed = Path("dataset/data/processed")
+top1 = top3 = n = 0
+by_relation = {}
+for bug_id in sample_ids:
+    rec = results.get(bug_id)
+    if not rec or _primary_fix_layer_of(rec) is None: continue
+    proc = processed / f"{bug_id}.json"
+    if not proc.exists(): continue
+    crashes = (json.loads(proc.read_text()).get("crashes") or [{}])
+    cr = crashes[0].get("crash_report") or ""
+    if not cr: continue
+    preds = predictor.predict(cr, k=20, top=3,
+                              exclude_bug_ids={bug_id}, prior_weight=0.5)
+    if not preds: continue
+    gt = _primary_fix_layer_of(rec)
+    keys = [(p.domain, p.layer_name, p.layer_level) for p in preds]
+    rel = rec.get("relation", "")
+    b = by_relation.setdefault(rel, [0, 0, 0])
+    b[2] += 1; n += 1
+    if keys[0] == gt: top1 += 1; b[0] += 1
+    if gt in keys: top3 += 1; b[1] += 1
+
+print(f"\nlayer top-1: {top1/n:.1%}    top-3: {top3/n:.1%}    n={n}")
+for rel, (t1, t3, m) in by_relation.items():
+    print(f"  {rel:14s} n={m:3d}  top-1={t1/m:.1%}  top-3={t3/m:.1%}")
+EOF
+```
+
+Expected (random seed 0): ~58 % top-1 / ~80 % top-3 overall, breakdown
+matching the table above ±2 pt.
+
 ## Concrete examples
 
 ### Cross-layer (specific FS → VFS core)
