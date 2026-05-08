@@ -312,7 +312,7 @@ and ships in two phases:
 | Phase | Implementation | Status |
 |---|---|---|
 | **Phase 1** | retrieval voter (FAISS kNN over crash embeddings + per-domain crash-layer anchor); no training, CPU-only | shipped — commit `ffeda2c` |
-| **Phase 2** | trained encoder + hierarchical (domain → layer) classification head; bge-base-en-v1.5 backbone + linear head; same_layer used as majority-class supervision | pending — needs GPU box |
+| **Phase 2** | trained linear head over frozen bge-base-en-v1.5 [CLS] embeddings; 24-class joint softmax over `(domain, layer_name, layer_level)`; curriculum / inv-freq / uniform / same-only weighting schemes | scaffolded — `build_training.py` and `train_head.py` runnable; awaiting GPU run |
 
 Long-form plan & design decisions:
 [`~/.claude/plans/layer-prediction-from-same-layer-supervision.md`](
@@ -442,6 +442,73 @@ EOF
 
 Expected (random seed 0): ~58 % top-1 / ~80 % top-3 overall, breakdown
 matching the table above ±2 pt.
+
+### Phase 2 — trained head (build, smoke, GPU run)
+
+Phase 2 ships two new files under `memory/cross_layer/`:
+
+| File | Where it runs | Purpose |
+|---|---|---|
+| `build_training.py` | local CPU | emits `data/training/{train,eval,test}.jsonl` + `class_map.json` |
+| `train_head.py` | smoke local CPU / full remote GPU | encodes crash texts with frozen bge-base-en-v1.5, trains a linear head, dumps `data/layer_head/head.pt` |
+
+Splits (per `--train-pool` default `all-fil`):
+
+| Split | n | Source |
+|---|---:|---|
+| train | 4 523 | every record in `result.json` with `fix_internal_layers`, minus eval and test |
+| eval  |   137 | `memory/data/split.json[eval]` minus test (cross-comparable with the memory-system paper) |
+| test  |   244 | `dataset/data/training/sft_crash_to_patch_location/test.jsonl` (canonical held-out) |
+
+Pass `--train-pool split-json` if you want the strict ≈ 535-bug pool that
+matches the memory-system paper's training set; the wider pool is the
+default because the per-stratum acceptance floors (cross_layer ≥ 55 %,
+cross_domain ≥ 30 %) need more than the 68 / 16 cross-relation training
+bugs that `split-json` keeps after the test-overlap cut.
+
+Build the JSONLs (≈10 s):
+
+```bash
+python -m memory.cross_layer.build_training
+ls memory/cross_layer/data/training/
+# class_map.json  build_log.json  train.jsonl  eval.jsonl  test.jsonl
+```
+
+Local CPU smoke test of the trainer (≈45 s with bge-base already cached;
+must succeed before the GPU run):
+
+```bash
+python -m memory.cross_layer.train_head \
+    --limit 100 --device cpu --epochs 2 --weighting curriculum --no-cache
+# expect: pipeline runs to "[done] best epoch=… weighted=…"; numbers will
+# be near random because of --limit 100 — that is intentional.
+```
+
+Full GPU run (rsync `memory/cross_layer/` and the JSONLs to the remote
+box, then):
+
+```bash
+python -m memory.cross_layer.train_head \
+    --weighting curriculum --epochs 8 --batch-size 64 --device cuda
+# Outputs:
+#   memory/cross_layer/data/layer_head/head.pt          (best-by-weighted)
+#   memory/cross_layer/data/layer_head/train_log.jsonl
+#   memory/cross_layer/data/layer_head/train_config.json
+```
+
+Weighting schemes (`--weighting`):
+
+| Scheme | Effect |
+|---|---|
+| `uniform` | every sample equal weight (default in earlier drafts) |
+| `inv-freq` | rebalances samples so each `relation` stratum carries equal mass |
+| `curriculum` (default) | epoch 0 trains on `same_layer` only, epoch 1 adds `cross_layer`, epoch ≥ 2 includes `cross_domain` |
+| `same-only` | trains exclusively on `same_layer` — the negative-control for "same_layer alone is not enough" |
+
+Per-epoch metrics emitted to `train_log.jsonl` cover `top1` / `top3` /
+`domain_top1` per stratum and a plan-weighted overall
+(`0.795·same + 0.113·cross_layer + 0.092·cross_domain`) so the GPU box
+self-reports whether the run cleared the acceptance floors.
 
 ## Concrete examples
 

@@ -21,6 +21,9 @@ analysis/results/
 # ── Memory system data (regenerable) ──────────────────────
 memory/data/
 
+# ── Cross-layer Phase 2 artifacts (regenerable; large) ────
+memory/cross_layer/data/
+
 # ── Dataset data (too large for git; use HuggingFace Hub) ──
 dataset/data/raw/
 dataset/data/processed/
