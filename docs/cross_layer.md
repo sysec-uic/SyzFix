@@ -314,6 +314,7 @@ and ships in two phases:
 | **Phase 1** | retrieval voter (FAISS kNN over crash embeddings + per-domain crash-layer anchor); no training, CPU-only | shipped — commit `ffeda2c` |
 | **Phase 2** | trained linear head over frozen bge-base-en-v1.5 [CLS] embeddings; 24-class joint softmax over `(domain, layer_name, layer_level)`; curriculum / inv-freq / uniform / same-only weighting schemes | shipped — first run lands `top1=61%`, `top3=84%` (commits `fe12a4c`, `ef0ff46`) |
 | **Phase 2.1** | concat 25-d one-hot of `primary_crash_layer` to the [CLS] embedding before the head — `--use-crash-layer-feature` flag in `train_head.py` and `eval_head.py` | shipped — pushes `top1=76%`, `top3=91%`, same_layer 63→82%, weighted 60→75%, binary cross-layer accuracy 56→73% |
+| **Phase 2.2** | replace linear head with MLP (`Linear → ReLU → Dropout → Linear`) — `--head mlp --mlp-hidden N --mlp-dropout F` flags | shipped — modest improvement (`bin F1 0.484→0.538`, `weighted 0.749→0.754`); the **same_layer ≥ 95 % target is unreachable with architecture changes alone** — diagnosed as a data-ceiling problem (see Phase 2.2 section below) |
 
 Long-form plan & design decisions:
 [`~/.claude/plans/layer-prediction-from-same-layer-supervision.md`](
@@ -734,24 +735,95 @@ Acceptance-criterion checklist after Phase 2.1:
 | weighted ≥ 80 % | 60.0 % (curriculum) | 74.9 % (curriculum +clf) | ❌ closer, ~5 pt short |
 | top-3 ≥ 80 % | 83.6 % | **91.0 %** | ✅ |
 
-**Next lever** (Phase 2.2): the same_layer 95 % floor is the only
-remaining miss. The diagnosis is over-fitting on the crash-layer
-one-hot vs the [CLS] features — the head learns "same_layer ≈ identity
-on crash bit" but degrades on bugs whose primary crash layer is wrong
-(infrastructure-only stack, mis-classified frame). Three candidates,
-roughly increasing cost:
+### Phase 2.2 — MLP head and the data-ceiling diagnosis
 
-1. Replace the `Linear(792, 24)` with an MLP `Linear(792, 256) → ReLU →
-   Dropout(0.1) → Linear(256, 24)`. Same data, same training time,
-   should pick up the residual pattern that distinguishes which layer
-   *within* a domain owns the fix.
-2. Multi-token pooling — mean-pool the encoder's last hidden state
-   instead of using `[CLS]` only. Stack-trace tokens carry layer
-   information that `[CLS]` flattens.
-3. LoRA fine-tune the encoder (adds ≈ 1 M trainable params on top of
-   the frozen 110 M).
+The Phase 2.1 hypothesis ("same_layer 95 % is reachable with a non-linear
+head over the same 792-d feature") is **falsified**. Adding an MLP head
+moves `weighted` by less than 1 pt and `same_layer top-1` by less than
+3 pt, well short of the 12-pt jump the floor requires.
 
-Start with (1).
+`--head mlp --mlp-hidden 256 --mlp-dropout 0.2` (with `lr=1e-3`,
+`wd=1e-3`) produced these test-split numbers, side by side with the
+Phase 2.1 linear-head reference rows:
+
+| weighting | head | weighted | same | x_layer | x_dom | top3 | dom | bin acc | bin F1 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| curriculum | linear  | 0.749 | 0.818 | 0.667 | 0.250 | 0.910 | 0.791 | 0.728 | 0.484 |
+| inv-freq   | linear  | 0.676 | 0.672 | **0.800** | 0.562 | 0.881 | 0.746 | 0.654 | 0.488 |
+| curriculum | mlp     | 0.747 | 0.818 | 0.700 | 0.188 | 0.906 | **0.803** | 0.724 | 0.489 |
+| **uniform**    | **mlp**     | **0.754** | 0.813 | 0.700 | 0.312 | 0.902 | 0.807 | **0.753** | **0.538** |
+| inv-freq   | mlp     | 0.654 | 0.641 | 0.767 | **0.625** | 0.877 | 0.734 | 0.642 | 0.485 |
+| same-only  | mlp     | 0.701 | **0.838** | 0.200 | 0.125 | 0.824 | 0.783 | 0.683 | 0.330 |
+
+A wider MLP (`--mlp-hidden 512`, `--mlp-dropout 0.1`, `lr=5e-3`, `wd=1e-4`)
+overfits — train loss drops to 0.17 by epoch 29 with no test-set gain.
+We keep `hidden=256, dropout=0.2, lr=1e-3` as the Phase 2.2 default.
+
+**Why the MLP barely moves the needle — the data ceiling**
+
+A one-line diagnostic over `test.jsonl`:
+
+```python
+match = sum(
+    1 for r in test
+    if r["primary_crash_layer"] is not None
+    and tuple(r["primary_crash_layer"]) ==
+        (r["label_domain"], r["label_layer_name"], r["label_layer_level"])
+)
+print(match / len(test))
+```
+
+| stratum | n | `primary_crash_layer == primary_fix_layer` |
+|---|---:|---:|
+| all          | 244 | 56.1 % (137/244) |
+| **same_layer**   | **198** | **69.2 % (137/198)** |
+| cross_layer  |  30 |  0.0 % (0/30)   |
+| cross_domain |  16 |  0.0 % (0/16)   |
+
+The `same_layer` ground truth disagrees with `primary_crash_layer` on
+**31 % of same_layer test bugs**. This is the absolute upper bound on
+what the crash-layer one-hot feature alone can deliver: a model that
+literally copies the crash bit and outputs it as the prediction would
+score 69.2 % on `same_layer top-1`. We're at 81.8–83.8 % — already
+**~15 pt past the data ceiling** because the `[CLS]` embedding is
+disambiguating the cases where the primary crash frame is misleading
+(infrastructure-only stacks, mis-classified frames, helper utilities).
+
+The remaining gap (`83.8 → 95`) cannot be closed by architecture
+changes on the current feature set. The bottleneck is feature
+extraction.
+
+### Phase 2.3 candidates (next lever)
+
+The Phase 2.2 diagnostic redirects future effort to the input side:
+
+1. **Use top-K crash layers**, not just the primary. Concat the top-3
+   `crash_layers_top_n` entries' one-hots — the right layer is in the
+   top-3 for ≥ 90 % of same_layer bugs. Cheapest, highest expected
+   impact.
+2. **Better primary-frame heuristic.** The current rule (first non-inline
+   non-infra frame) misclassifies ~30 % of same_layer bugs. A second
+   pass — "if the first non-infra frame is a generic helper (`include/
+   linux/list.h`, `lib/`, `kernel/sched/`), keep walking" — would
+   tighten this. Ideally co-developed with the kernel-layers taxonomy
+   so the analyzer and the predictor agree.
+3. **Mean-pool the encoder's last hidden state** instead of `[CLS]`.
+   Stack-trace tokens carry layer info that `[CLS]` flattens.
+4. **LoRA fine-tune the encoder** (~ 1 M trainable params on top of
+   the frozen 110 M). Highest cost, last resort.
+
+Start with (1) — keeps the architecture identical and isolates the
+feature contribution.
+
+### Acceptance-criterion checklist after Phase 2.2
+
+| target | best | status |
+|---|---:|:---:|
+| cross_layer top-1 ≥ 55 % | 80.0 % (inv-freq linear +clf) | ✅ |
+| cross_domain top-1 ≥ 30 % | 62.5 % (inv-freq mlp +clf) | ✅ |
+| top-3 ≥ 80 % | 91.0 % (curriculum linear +clf) | ✅ |
+| same_layer top-1 ≥ 95 % | 83.8 % (same-only mlp +clf) | ❌ blocked by 69 % data ceiling |
+| weighted ≥ 80 % | 75.4 % (uniform mlp +clf) | ❌ same blocker |
 
 ## Concrete examples
 
