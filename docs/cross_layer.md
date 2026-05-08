@@ -443,30 +443,34 @@ EOF
 Expected (random seed 0): ~58 % top-1 / ~80 % top-3 overall, breakdown
 matching the table above ±2 pt.
 
-### Phase 2 — trained head (build, smoke, GPU run)
+### Phase 2 — trained head: build, train, evaluate
 
-Phase 2 ships two new files under `memory/cross_layer/`:
+Phase 2 ships three new modules under `memory/cross_layer/`:
 
-| File | Where it runs | Purpose |
+| Module | Where it runs | Purpose |
 |---|---|---|
 | `build_training.py` | local CPU | emits `data/training/{train,eval,test}.jsonl` + `class_map.json` |
-| `train_head.py` | smoke local CPU / full remote GPU | encodes crash texts with frozen bge-base-en-v1.5, trains a linear head, dumps `data/layer_head/head.pt` |
+| `train_head.py` | local CPU smoke / remote GPU full | encodes crash texts with frozen `BAAI/bge-base-en-v1.5`, trains a `Linear(768, 24)` head, dumps `data/layer_head*/head.pt` |
+| `eval_head.py` | local CPU / remote GPU | scores any saved `head.pt` against the held-out test split, emits a Markdown comparison table |
 
-Splits (per `--train-pool` default `all-fil`):
+#### 1. Build training JSONLs (CPU, ≈10 s)
 
-| Split | n | Source |
+`build_training.py` joins the cross-layer analyzer's `result.json`,
+`memory/data/split.json`, and the locator's `test.jsonl` into three
+disjoint splits with a shared 24-class joint label space over
+`(domain, layer_name, layer_level)`.
+
+| Split | n on this dataset | Source |
 |---|---:|---|
-| train | 4 523 | every record in `result.json` with `fix_internal_layers`, minus eval and test |
+| train | ≈ 4 523 | every record in `result.json` with `fix_internal_layers`, minus eval and test (`--train-pool all-fil`, default) |
 | eval  |   137 | `memory/data/split.json[eval]` minus test (cross-comparable with the memory-system paper) |
-| test  |   244 | `dataset/data/training/sft_crash_to_patch_location/test.jsonl` (canonical held-out) |
+| test  |   244 | `dataset/data/training/sft_crash_to_patch_location/test.jsonl` after dropping bugs without `fix_internal_layers` |
 
-Pass `--train-pool split-json` if you want the strict ≈ 535-bug pool that
+Pass `--train-pool split-json` for the strict ≈ 535-bug pool that
 matches the memory-system paper's training set; the wider pool is the
 default because the per-stratum acceptance floors (cross_layer ≥ 55 %,
 cross_domain ≥ 30 %) need more than the 68 / 16 cross-relation training
 bugs that `split-json` keeps after the test-overlap cut.
-
-Build the JSONLs (≈10 s):
 
 ```bash
 python -m memory.cross_layer.build_training
@@ -474,41 +478,169 @@ ls memory/cross_layer/data/training/
 # class_map.json  build_log.json  train.jsonl  eval.jsonl  test.jsonl
 ```
 
-Local CPU smoke test of the trainer (≈45 s with bge-base already cached;
-must succeed before the GPU run):
+#### 2. CPU smoke test (≈45 s)
+
+Always run this before shipping a GPU job — it catches missing data
+files and verifies bge-base-en-v1.5 is reachable on the local HF cache:
 
 ```bash
 python -m memory.cross_layer.train_head \
     --limit 100 --device cpu --epochs 2 --weighting curriculum --no-cache
-# expect: pipeline runs to "[done] best epoch=… weighted=…"; numbers will
-# be near random because of --limit 100 — that is intentional.
+# expect: encoder loads, two epochs run, "[done] best epoch=… weighted=…"
+# (numbers are near random because of --limit 100 — that's intentional)
 ```
 
-Full GPU run (rsync `memory/cross_layer/` and the JSONLs to the remote
-box, then):
+#### 3. GPU run on `pve-ai`
+
+Prerequisites — verify once per box:
 
 ```bash
-python -m memory.cross_layer.train_head \
-    --weighting curriculum --epochs 8 --batch-size 64 --device cuda
-# Outputs:
-#   memory/cross_layer/data/layer_head/head.pt          (best-by-weighted)
-#   memory/cross_layer/data/layer_head/train_log.jsonl
-#   memory/cross_layer/data/layer_head/train_config.json
+ssh pve-ai 'source /home/xiaoguang/syzfix/venv/bin/activate && \
+    python -c "import torch; print(torch.__version__, torch.cuda.is_available())"'
+# expect: 2.11.0+cu130 True   (CUDA 13.0 / RTX 5090, ~32 GB VRAM)
 ```
+
+Sync the local code + the small files the analyzer needs (the box
+already has `dataset/data/processed/` and `result.json`):
+
+```bash
+git push origin main
+ssh pve-ai 'cd /home/xiaoguang/syzfix && git pull --ff-only'
+
+rsync -avh memory/data/split.json \
+    pve-ai:/home/xiaoguang/syzfix/memory/data/split.json
+rsync -avh dataset/data/training/sft_crash_to_patch_location/test.jsonl \
+    pve-ai:/home/xiaoguang/syzfix/dataset/data/training/sft_crash_to_patch_location/test.jsonl
+```
+
+Build + train on the GPU box. Embeddings are encoded once (≈15 s for
+4.4 k crash reports on a 5090) and cached under
+`memory/cross_layer/data/training/embeddings/` so subsequent runs only
+do head training (sub-second per epoch):
+
+```bash
+ssh pve-ai 'cd /home/xiaoguang/syzfix && source venv/bin/activate && \
+    python -m memory.cross_layer.build_training'
+
+# One-shot ablation: four weightings, 30 epochs each (~3 min total).
+ssh pve-ai 'cd /home/xiaoguang/syzfix && source venv/bin/activate && \
+    bash -c "for w in curriculum uniform inv-freq same-only; do
+        python -m memory.cross_layer.train_head \
+            --weighting \$w --epochs 30 --batch-size 64 --lr 5e-3 \
+            --device cuda \
+            --out-dir memory/cross_layer/data/layer_head_\${w}; \
+    done"'
+```
+
+Each `--out-dir` receives:
+
+| File | Content |
+|---|---|
+| `head.pt`           | best-by-weighted checkpoint (`{head_state_dict, dim, n_classes, encoder, best_epoch, best_metrics}`) |
+| `train_log.jsonl`   | per-epoch loss + full per-stratum metrics |
+| `train_config.json` | encoder, weighting, hyperparams, device, seed, best epoch |
+| `class_map.json`    | 24-class id ↔ `(domain, layer_name, layer_level)` map (copied from `data/training/`) |
 
 Weighting schemes (`--weighting`):
 
 | Scheme | Effect |
 |---|---|
-| `uniform` | every sample equal weight (default in earlier drafts) |
-| `inv-freq` | rebalances samples so each `relation` stratum carries equal mass |
-| `curriculum` (default) | epoch 0 trains on `same_layer` only, epoch 1 adds `cross_layer`, epoch ≥ 2 includes `cross_domain` |
-| `same-only` | trains exclusively on `same_layer` — the negative-control for "same_layer alone is not enough" |
+| `uniform`            | every sample equal weight |
+| `inv-freq`           | rebalances samples so each `relation` stratum carries equal mass |
+| `curriculum` (default) | epoch 0 same_layer only, epoch 1 + cross_layer, epoch ≥ 2 + cross_domain |
+| `same-only`          | trains exclusively on `same_layer` — negative-control for "same_layer alone is not enough" |
 
-Per-epoch metrics emitted to `train_log.jsonl` cover `top1` / `top3` /
-`domain_top1` per stratum and a plan-weighted overall
-(`0.795·same + 0.113·cross_layer + 0.092·cross_domain`) so the GPU box
-self-reports whether the run cleared the acceptance floors.
+#### 4. Sync artifacts back
+
+Don't pull the embedding cache (regenerable, large). Everything else is
+under 1 MB per variant:
+
+```bash
+rsync -avh --exclude='embeddings/' --exclude='*.npy' \
+    pve-ai:/home/xiaoguang/syzfix/memory/cross_layer/data/ \
+    memory/cross_layer/data/
+```
+
+#### 5. Score the held-out test split (eval)
+
+Per-epoch validation during training uses `eval.jsonl` (137 bugs);
+the canonical 244-bug `test.jsonl` is reserved for the final number.
+`eval_head.py` loads any saved `head.pt`, re-encodes test crashes (or
+reuses `data/training/embeddings/test.npy`), and prints a stratified
+table.
+
+```bash
+# On the GPU box — fastest, since embeddings.test.npy is cached there.
+ssh pve-ai 'cd /home/xiaoguang/syzfix && source venv/bin/activate && \
+    python -m memory.cross_layer.eval_head \
+        --head-dir memory/cross_layer/data/layer_head_curriculum \
+                  memory/cross_layer/data/layer_head_uniform \
+                  memory/cross_layer/data/layer_head_inv-freq \
+                  memory/cross_layer/data/layer_head_same-only \
+        --output memory/cross_layer/data/eval/test_metrics.md \
+        --device cuda'
+
+# Or locally on CPU after sync (≈30 s for the encode pass; reuses the
+# cached test embedding if you rsync'd it).
+python -m memory.cross_layer.eval_head \
+    --head-dir memory/cross_layer/data/layer_head_curriculum \
+    --device cpu
+```
+
+Reading the report — what each column tells you:
+
+| Column | Meaning |
+|---|---|
+| `weighted`        | plan-weighted overall: `0.795·same + 0.113·cross_layer + 0.092·cross_domain`. Single headline number for the acceptance criterion. |
+| `same top1`       | hardest target for "is the model learning the trivial pattern?". Phase 1 retrieval baseline lands at ~59 %. Trained head needs ≥ 95 % to clear the floor. |
+| `x_layer top1`    | the load-bearing number — needs the `fix_internal_layers` signal AND same_layer's negative supervision. Floor: ≥ 55 %. |
+| `x_dom top1`      | hardest stratum (the model has to *change domain*); only useful if the trained head clearly beats the retrieval baseline. Floor: ≥ 30 %. |
+| `all top3`        | cheap upper bound — if this is much higher than top1, retrieval-style re-ranking can salvage a lot of cases. |
+| `domain top1`     | argmax over the marginal `p(domain) = Σ_l p(domain, l)`. A weak domain top1 means the encoder isn't even getting the subsystem right; a high domain top1 with poor layer top1 means the head is confusing layers within the right subsystem. |
+
+#### Observed numbers (current dataset)
+
+Single training run, `--lr 5e-3 --batch-size 64 --epochs 30`, RTX 5090,
+seed 42. Test set: 244 bugs (198 same / 30 cross_layer / 16 cross_domain).
+
+| weighting | best ep | weighted | same top1 | x_layer top1 | x_dom top1 | all top1 | all top3 | domain top1 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **curriculum** | 24 | **0.600** | 0.626 | **0.700** | 0.250 | 0.611 | **0.836** | 0.664 |
+| uniform        | 19 | 0.588 | 0.611 | **0.700** | 0.250 | 0.598 | 0.811 | 0.652 |
+| inv-freq       | 15 | 0.513 | 0.495 | **0.700** | **0.438** | 0.516 | 0.758 | 0.578 |
+| same-only      | 26 | 0.593 | **0.636** | 0.667 | 0.125 | 0.607 | 0.799 | 0.656 |
+
+Read of these numbers (the calibration that should drive Phase 2.1):
+
+- **`cross_layer ≥ 55 %` floor cleared across the board** (70 % on the
+  three trained-on-cross variants), and `cross_domain` clears `30 %`
+  with `inv-freq` (43.8 %). The trained head materially beats Phase 1
+  retrieval (50 % cross_layer, 25 % cross_domain) on these strata —
+  this is the load-bearing improvement.
+- **`same_layer ≥ 95 %` floor missed badly (best 63.6 %).** A
+  `Linear(768, 24)` over frozen `[CLS]` embeddings of 512 BPE-truncated
+  crash text caps around 60–65 % same-layer top-1; the embedding
+  clusters bugs by domain (`domain top1 ≈ 66 %`) but doesn't separate
+  *layers within a subsystem*. To clear 95 % we need either a stronger
+  feature (concatenate `primary_crash_layer` one-hot to the embedding —
+  same_layer ≈ "predict the crash layer"), or a non-linear head, or
+  fine-tuning the encoder with LoRA. None are wired in v1.
+- **Curriculum vs uniform vs same-only is roughly a wash on top-1**
+  (within ±2 pt). The same-only baseline tying within 1 pt of curriculum
+  on `same_layer` is itself a finding: the cross_layer gain comes from
+  the encoder + linear head, not from oversampling cross_layer rows.
+  The interpretable difference is the cross_domain stratum, where
+  curriculum (25 %) beats same-only (12.5 %) — the negative
+  supervision that "the answer is *not* the crash layer" only kicks in
+  when cross_domain rows are visible.
+- **`top-3 = 83.6 %` already beats Phase 1's 80 %** — top-1 is the only
+  miss, and the layer-prior signal is good enough to feed Phase 3's
+  file-locator wrapper (the locator reweights, not picks).
+
+The scaffold from this section is complete. Phase 2.1 (improving the
+same_layer top-1 ceiling) is a separate iteration documented in
+`~/.claude/plans/layer-prediction-from-same-layer-supervision.md` →
+"Risks & mitigations" → contracted-feature ablation.
 
 ## Concrete examples
 
