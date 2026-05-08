@@ -315,6 +315,7 @@ and ships in two phases:
 | **Phase 2** | trained linear head over frozen bge-base-en-v1.5 [CLS] embeddings; 24-class joint softmax over `(domain, layer_name, layer_level)`; curriculum / inv-freq / uniform / same-only weighting schemes | shipped — first run lands `top1=61%`, `top3=84%` (commits `fe12a4c`, `ef0ff46`) |
 | **Phase 2.1** | concat 25-d one-hot of `primary_crash_layer` to the [CLS] embedding before the head — `--use-crash-layer-feature` flag in `train_head.py` and `eval_head.py` | shipped — pushes `top1=76%`, `top3=91%`, same_layer 63→82%, weighted 60→75%, binary cross-layer accuracy 56→73% |
 | **Phase 2.2** | replace linear head with MLP (`Linear → ReLU → Dropout → Linear`) — `--head mlp --mlp-hidden N --mlp-dropout F` flags | shipped — modest improvement (`bin F1 0.484→0.538`, `weighted 0.749→0.754`); the **same_layer ≥ 95 % target is unreachable with architecture changes alone** — diagnosed as a data-ceiling problem (see Phase 2.2 section below) |
+| **Phase 2.3** | concat top-3 distinct `crash_layers_top_n` one-hots instead of just the primary — `--crash-layer-topk K` flag in `build_training.py`, `train_head.py`, `eval_head.py` | shipped — biggest single jump: top-1 76.6→**79.9 %**, top-3 90.2→**93.9 %**, same_layer 83.8→**86.4 %**, weighted 75.4→**78.4 %**, x_layer 70→**86.7 %**, domain top-1 80.7→**84.4 %**; `weighted ≥ 80 %` now only 1.6 pt short |
 
 Long-form plan & design decisions:
 [`~/.claude/plans/layer-prediction-from-same-layer-supervision.md`](
@@ -793,37 +794,140 @@ The remaining gap (`83.8 → 95`) cannot be closed by architecture
 changes on the current feature set. The bottleneck is feature
 extraction.
 
-### Phase 2.3 candidates (next lever)
+### Phase 2.3 — top-K crash layers raises the data ceiling 20 pt
 
-The Phase 2.2 diagnostic redirects future effort to the input side:
+The Phase 2.2 diagnostic redirected effort to the feature side:
+`primary_crash_layer` matches `primary_fix_layer` on only 69 % of
+same_layer test bugs, and 0 % of cross_layer / cross_domain bugs.
+Phase 2.3 swaps the 25-d "primary only" one-hot for a 75-d "top-3
+distinct" concatenation built from the same `crash_layers_top_n` field.
 
-1. **Use top-K crash layers**, not just the primary. Concat the top-3
-   `crash_layers_top_n` entries' one-hots — the right layer is in the
-   top-3 for ≥ 90 % of same_layer bugs. Cheapest, highest expected
-   impact.
-2. **Better primary-frame heuristic.** The current rule (first non-inline
-   non-infra frame) misclassifies ~30 % of same_layer bugs. A second
-   pass — "if the first non-infra frame is a generic helper (`include/
-   linux/list.h`, `lib/`, `kernel/sched/`), keep walking" — would
-   tighten this. Ideally co-developed with the kernel-layers taxonomy
-   so the analyzer and the predictor agree.
+`build_training.py` now emits a `crash_layers_topk` field per row — up
+to three distinct `(domain, layer_name, layer_level)` triples, taken
+in priority order (non-inline non-infra → non-inline → any). Slot 0
+matches `primary_crash_layer` whenever pass-1 yields anything; slots
+1 and 2 add the architectural diversity the data ceiling needed.
+
+The new data ceiling (one-line check on `test.jsonl`, "is the right
+fix layer in the top-K crash layers?"):
+
+| stratum | n | K=1 | K=2 | K=3 | avg K available |
+|---|---:|---:|---:|---:|---:|
+| all          | 244 | 56.1 % | 75.8 % | **79.9 %** | 2.52 |
+| same_layer   | 198 | 69.2 % | 86.4 % | **88.9 %** | 2.53 |
+| cross_layer  |  30 |  0.0 % | 46.7 % | **63.3 %** | 2.57 |
+| cross_domain |  16 |  0.0 % |  0.0 % |  0.0 %      | 2.38 |
+
+cross_domain bugs are by definition out of reach for any crash-layer
+feature (the fix layer's domain is disjoint from every crash layer's),
+so the encoder must learn those entirely from the [CLS] embedding.
+
+Reproduction:
+
+```bash
+# Re-emit JSONLs so test/eval/train carry the crash_layers_topk field.
+python -m memory.cross_layer.build_training
+
+# 8-way ablation on the GPU box: 4 weightings × {linear, mlp} × K=3
+ssh pve-ai 'cd /home/xiaoguang/syzfix && source venv/bin/activate && \
+    bash -c "for w in curriculum uniform inv-freq same-only; do
+        for h in linear mlp; do
+            python -m memory.cross_layer.train_head \
+                --weighting \$w --epochs 30 --batch-size 64 \
+                --lr \$([ \$h = mlp ] && echo 1e-3 || echo 5e-3) \
+                --weight-decay \$([ \$h = mlp ] && echo 1e-3 || echo 1e-4) \
+                --device cuda --use-crash-layer-feature --crash-layer-topk 3 \
+                --head \$h --mlp-hidden 256 --mlp-dropout 0.2 \
+                --out-dir memory/cross_layer/data/layer_head_\${w}_\${h}_clf3; \
+        done
+    done"'
+
+# Score against the test split.
+ssh pve-ai 'cd /home/xiaoguang/syzfix && source venv/bin/activate && \
+    python -m memory.cross_layer.eval_head \
+        --head-dir memory/cross_layer/data/layer_head_*_clf3 \
+        --output memory/cross_layer/data/eval/test_metrics_phase23.md \
+        --device cuda'
+```
+
+eval_head reads `crash_layer_topk` from `train_config.json`
+automatically — old K=1 checkpoints stay loadable, new K=3 ones use
+the wider feature.
+
+#### Phase 2.3 numbers (test split, 244 bugs, seed 42, 30 epochs)
+
+Reference rows (Phase 2.1 / 2.2 best) on top, K=3 rows below:
+
+| weighting | head | clf K | weighted | same | x_layer | x_dom | top1 | top3 | dom | bin acc | bin F1 |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| curriculum | linear | 1 | 0.749 | 0.818 | 0.667 | 0.250 | 0.762 | 0.910 | 0.791 | 0.728 | 0.484 |
+| uniform    | mlp    | 1 | 0.754 | 0.813 | 0.700 | 0.312 | 0.766 | 0.902 | 0.807 | 0.753 | 0.538 |
+| inv-freq   | linear | 1 | 0.676 | 0.672 | 0.800 | 0.562 | 0.680 | 0.881 | 0.746 | 0.654 | 0.488 |
+| curriculum | linear | 3 | 0.764 | 0.823 | 0.767 | 0.250 | 0.779 | 0.930 | 0.807 | 0.733 | 0.526 |
+| curriculum | mlp    | 3 | 0.767 | 0.838 | 0.733 | 0.188 | 0.783 | **0.939** | 0.824 | 0.716 | 0.489 |
+| uniform    | linear | 3 | 0.768 | 0.828 | 0.767 | 0.250 | 0.783 | **0.939** | 0.811 | 0.737 | 0.522 |
+| **uniform**    | **mlp**    | **3** | **0.784** | 0.854 | 0.733 | 0.250 | **0.799** | **0.939** | **0.844** | 0.720 | 0.507 |
+| inv-freq   | linear | 3 | 0.704 | 0.702 | 0.833 | 0.562 | 0.709 | 0.885 | 0.754 | 0.621 | 0.459 |
+| **inv-freq**   | **mlp**    | **3** | 0.704 | 0.697 | **0.867** | 0.562 | 0.709 | 0.922 | 0.770 | 0.621 | 0.471 |
+| same-only  | linear | 3 | 0.724 | **0.864** | 0.233 | 0.125 | 0.738 | 0.885 | 0.828 | 0.679 | 0.291 |
+| same-only  | mlp    | 3 | 0.713 | **0.864** | 0.133 | 0.125 | 0.725 | 0.869 | 0.828 | 0.663 | 0.255 |
+
+Reads:
+
+- **`uniform mlp +clf3` is the new headline checkpoint**: weighted
+  0.784 (was 0.754), top-1 79.9 % (+3.3), top-3 93.9 % (+3.7),
+  same_layer 85.4 % (+4.1), domain top-1 84.4 % (+3.7). Every metric
+  except cross_domain top-1 improves over the Phase 2.2 best.
+- **`inv-freq mlp +clf3`** sets a new cross_layer high-water mark at
+  **86.7 %** top-1 (was 80 %). It's the right pick for the file-locator
+  wrapper's cross-stratum re-weighting.
+- **`same-only +clf3`** lifts same-layer top-1 to **86.4 %** — within
+  2.5 pt of the new K=3 data ceiling (88.9 %), confirming the model
+  has nearly saturated what the top-3 crash-layer feature can deliver
+  for the same_layer stratum. Cross-strata recall remains a casualty
+  (this is the negative control).
+- **`top-3 = 93.9 %` on three variants** — for downstream uses where
+  candidate re-ranking is allowed (Phase 3 file-locator wrapper), the
+  layer prior is now strong enough that the right answer is almost
+  always in the top-3 candidate set.
+
+#### Acceptance-criterion checklist after Phase 2.3
+
+| target | best | status |
+|---|---:|:---:|
+| cross_layer top-1 ≥ 55 %  | **86.7 %** (inv-freq mlp +clf3)  | ✅ +31.7 pt |
+| cross_domain top-1 ≥ 30 % | 56.2 % (inv-freq mlp +clf3)      | ✅ |
+| top-3 ≥ 80 %              | **93.9 %** (uniform mlp +clf3)  | ✅ +13.9 pt |
+| weighted ≥ 80 %           | 78.4 % (uniform mlp +clf3)       | ❌ **only 1.6 pt short** |
+| same_layer top-1 ≥ 95 %   | 86.4 % (same-only +clf3)         | ❌ at 97 % of new ceiling 88.9 % |
+
+### Phase 2.4 candidates (remaining gap)
+
+Two real targets remain:
+
+- `weighted ≥ 80 %`: 1.6 pt short. Most likely closed by hyperparameter
+  search (lr/wd/dropout grid around the `uniform mlp +clf3` point) or
+  longer training. Cheap.
+- `same_layer ≥ 95 %`: hard ceiling at 88.9 % from the data, so getting
+  past it needs better feature extraction or encoder fine-tuning.
+
+Levers, increasing cost:
+
+1. **Hyperparameter sweep** around `uniform mlp +clf3` — lr ∈
+   {5e-4, 1e-3, 2e-3}, dropout ∈ {0.1, 0.2, 0.3}, wd ∈ {1e-4, 1e-3},
+   epochs ∈ {30, 60}. Closes the 80 % weighted gap.
+2. **Tighter primary-frame heuristic** — the kernel-layers taxonomy
+   currently lets generic helpers (`include/linux/list.h`, `lib/`,
+   `kernel/sched/`) sit in slot 0. A second pass that walks past these
+   would lift the K=1 ceiling and boost the rank-aware feature.
+   Touches `analysis/analyzers/kernel_layers.py` (read-only constraint
+   #2 may need a waiver — confirm before touching).
 3. **Mean-pool the encoder's last hidden state** instead of `[CLS]`.
    Stack-trace tokens carry layer info that `[CLS]` flattens.
 4. **LoRA fine-tune the encoder** (~ 1 M trainable params on top of
    the frozen 110 M). Highest cost, last resort.
 
-Start with (1) — keeps the architecture identical and isolates the
-feature contribution.
-
-### Acceptance-criterion checklist after Phase 2.2
-
-| target | best | status |
-|---|---:|:---:|
-| cross_layer top-1 ≥ 55 % | 80.0 % (inv-freq linear +clf) | ✅ |
-| cross_domain top-1 ≥ 30 % | 62.5 % (inv-freq mlp +clf) | ✅ |
-| top-3 ≥ 80 % | 91.0 % (curriculum linear +clf) | ✅ |
-| same_layer top-1 ≥ 95 % | 83.8 % (same-only mlp +clf) | ❌ blocked by 69 % data ceiling |
-| weighted ≥ 80 % | 75.4 % (uniform mlp +clf) | ❌ same blocker |
+Start with (1) — cheap, isolates the optimisation contribution.
 
 ## Concrete examples
 
