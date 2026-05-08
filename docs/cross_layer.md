@@ -312,7 +312,8 @@ and ships in two phases:
 | Phase | Implementation | Status |
 |---|---|---|
 | **Phase 1** | retrieval voter (FAISS kNN over crash embeddings + per-domain crash-layer anchor); no training, CPU-only | shipped — commit `ffeda2c` |
-| **Phase 2** | trained linear head over frozen bge-base-en-v1.5 [CLS] embeddings; 24-class joint softmax over `(domain, layer_name, layer_level)`; curriculum / inv-freq / uniform / same-only weighting schemes | scaffolded — `build_training.py` and `train_head.py` runnable; awaiting GPU run |
+| **Phase 2** | trained linear head over frozen bge-base-en-v1.5 [CLS] embeddings; 24-class joint softmax over `(domain, layer_name, layer_level)`; curriculum / inv-freq / uniform / same-only weighting schemes | shipped — first run lands `top1=61%`, `top3=84%` (commits `fe12a4c`, `ef0ff46`) |
+| **Phase 2.1** | concat 25-d one-hot of `primary_crash_layer` to the [CLS] embedding before the head — `--use-crash-layer-feature` flag in `train_head.py` and `eval_head.py` | shipped — pushes `top1=76%`, `top3=91%`, same_layer 63→82%, weighted 60→75%, binary cross-layer accuracy 56→73% |
 
 Long-form plan & design decisions:
 [`~/.claude/plans/layer-prediction-from-same-layer-supervision.md`](
@@ -637,10 +638,120 @@ Read of these numbers (the calibration that should drive Phase 2.1):
   miss, and the layer-prior signal is good enough to feed Phase 3's
   file-locator wrapper (the locator reweights, not picks).
 
-The scaffold from this section is complete. Phase 2.1 (improving the
-same_layer top-1 ceiling) is a separate iteration documented in
-`~/.claude/plans/layer-prediction-from-same-layer-supervision.md` →
-"Risks & mitigations" → contracted-feature ablation.
+### Phase 2.1 — concat `primary_crash_layer` one-hot before the head
+
+The Phase 2 same_layer ceiling at 63 % top-1 is a feature-poverty
+problem, not an optimisation one: on 80 % of bugs the answer is the
+crash layer itself, but the [CLS] embedding doesn't expose that signal
+explicitly. Phase 2.1 fixes it with one flag — `--use-crash-layer-feature`
+on `train_head.py` and `eval_head.py` — that concatenates a 25-dim
+one-hot of `primary_crash_layer` (24 fix-class slots + 1 unknown bit,
+where "unknown" = the crash layer is not parseable or is outside the
+24-class fix-layer space; observed unknown rate ≈ 0.4 % on the
+all-fil training pool, 0 % on eval/test) to the 768-d [CLS] embedding
+before the linear head.
+
+Reproduction is the same recipe as Phase 2; just append the flag:
+
+```bash
+ssh pve-ai 'cd /home/xiaoguang/syzfix && source venv/bin/activate && \
+    bash -c "for w in curriculum uniform inv-freq same-only; do
+        python -m memory.cross_layer.train_head \
+            --weighting \$w --epochs 30 --batch-size 64 --lr 5e-3 \
+            --device cuda --use-crash-layer-feature \
+            --out-dir memory/cross_layer/data/layer_head_\${w}_clf; \
+    done"'
+
+# eval_head reads the flag from train_config.json and adds the feature
+# automatically — no flag needed at eval time.
+ssh pve-ai 'cd /home/xiaoguang/syzfix && source venv/bin/activate && \
+    python -m memory.cross_layer.eval_head \
+        --head-dir memory/cross_layer/data/layer_head_curriculum \
+                  memory/cross_layer/data/layer_head_uniform \
+                  memory/cross_layer/data/layer_head_inv-freq \
+                  memory/cross_layer/data/layer_head_same-only \
+                  memory/cross_layer/data/layer_head_curriculum_clf \
+                  memory/cross_layer/data/layer_head_uniform_clf \
+                  memory/cross_layer/data/layer_head_inv-freq_clf \
+                  memory/cross_layer/data/layer_head_same-only_clf \
+        --output memory/cross_layer/data/eval/test_metrics_phase21.md \
+        --device cuda'
+```
+
+`eval_head.py` now also computes the binary "is this crash cross-layer?"
+metric: derive `predicted_cross = (top1_layer ≠ primary_crash_layer)`,
+ground truth `gt_cross = (relation ≠ same_layer)`, then report
+accuracy / precision / recall / F1. Trivial baseline = "always predict
+same_layer" → 81.5 % accuracy on this test split (198 same / 45 cross).
+
+#### Phase 2.1 numbers (test split, 244 bugs, seed 42, lr 5e-3, 30 epochs)
+
+| weighting | +crash_layer | best ep | weighted | same top1 | x_layer | x_dom | top1 | top3 | dom top1 | bin acc | bin P | bin R | bin F1 |
+|---|:-:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| curriculum |     | 24 | 0.600 | 0.626 | 0.700 | 0.250 | 0.611 | 0.836 | 0.664 | 0.560 | 0.279 | 0.867 | 0.422 |
+| uniform    |     | 19 | 0.588 | 0.611 | 0.700 | 0.250 | 0.598 | 0.811 | 0.652 | 0.556 | 0.280 | 0.889 | 0.426 |
+| inv-freq   |     | 15 | 0.513 | 0.495 | 0.700 | 0.438 | 0.516 | 0.758 | 0.578 | 0.481 | 0.252 | 0.911 | 0.394 |
+| same-only  |     | 26 | 0.593 | 0.636 | 0.667 | 0.125 | 0.607 | 0.799 | 0.656 | 0.568 | 0.283 | 0.867 | 0.426 |
+| **curriculum** | **✓** | **22** | **0.749** | **0.818** | 0.667 | 0.250 | **0.762** | **0.910** | **0.791** | **0.728** | **0.373** | 0.689 | 0.484 |
+| uniform    | ✓   | 29 | 0.747 | 0.813 | 0.633 | 0.312 | 0.758 | 0.902 | 0.791 | 0.728 | 0.370 | 0.667 | 0.476 |
+| **inv-freq**   | **✓**   | 26 | 0.676 | 0.672 | **0.800** | **0.562** | 0.680 | 0.881 | 0.746 | 0.654 | 0.336 | **0.889** | **0.488** |
+| same-only  | ✓   | 11 | 0.694 | 0.828 | 0.267 | 0.062 | 0.709 | 0.852 | 0.770 | 0.720 | 0.323 | 0.467 | 0.382 |
+
+Reads:
+
+- **Curriculum + crash-layer feature is the new default** — `weighted=0.749`
+  beats every Phase 2 row by ≥ 14 pt absolute. Top-3 hits **91 %** so the
+  layer-prior signal for Phase 3's locator wrapper is comfortably good.
+  same_layer 63 → 82 % is the load-bearing change: the head can now
+  literally copy the crash-layer bit when retrieval signal is weak.
+- **Pareto frontier on the binary cross-layer flag**:
+  - Want **precision** (fewer false alarms)? `curriculum +clf`: 73 %
+    accuracy, 37 % precision, 69 % recall, F1 0.48.
+  - Want **recall** (catch every cross-layer bug for triage)? `inv-freq +clf`:
+    65 % accuracy, 34 % precision, **89 % recall**, F1 0.49.
+  - **Trivial baseline** (always say same_layer) still wins on accuracy
+    (81.5 %) — the binary task is fundamentally hard because cross-layer
+    is rare (18 % positive class). The trained head's value is its non-zero
+    F1 and the calibrated probability for downstream re-weighting, not
+    accuracy on its own.
+- **inv-freq + clf** also clears the per-stratum acceptance floors that
+  the plan called for: cross_layer **80 %** ≥ 55 %, cross_domain
+  **56.2 %** ≥ 30 %, top-3 **88.1 %** ≥ 80 %. same_layer at 67 % is
+  below the 95 % floor — that is now the bottleneck.
+- **same-only + clf** is the negative control: same_layer top-1 climbs
+  to 83 % but cross_layer collapses to 27 % and cross_domain to 6 %.
+  This is the "same_layer alone is not enough" story the paper wanted
+  — the cross-strata gain only materialises when cross rows are in
+  training.
+
+Acceptance-criterion checklist after Phase 2.1:
+
+| target (plan §"Acceptance criteria" #2) | Phase 2 best | Phase 2.1 best | met? |
+|---|---:|---:|:---:|
+| same_layer top-1 ≥ 95 % | 63.6 % (same-only) | 82.8 % (same-only +clf) | ❌ closer, still short |
+| cross_layer top-1 ≥ 55 % | 70.0 % (3 variants) | **80.0 % (inv-freq +clf)** | ✅ |
+| cross_domain top-1 ≥ 30 % | 43.8 % (inv-freq) | **56.2 % (inv-freq +clf)** | ✅ |
+| weighted ≥ 80 % | 60.0 % (curriculum) | 74.9 % (curriculum +clf) | ❌ closer, ~5 pt short |
+| top-3 ≥ 80 % | 83.6 % | **91.0 %** | ✅ |
+
+**Next lever** (Phase 2.2): the same_layer 95 % floor is the only
+remaining miss. The diagnosis is over-fitting on the crash-layer
+one-hot vs the [CLS] features — the head learns "same_layer ≈ identity
+on crash bit" but degrades on bugs whose primary crash layer is wrong
+(infrastructure-only stack, mis-classified frame). Three candidates,
+roughly increasing cost:
+
+1. Replace the `Linear(792, 24)` with an MLP `Linear(792, 256) → ReLU →
+   Dropout(0.1) → Linear(256, 24)`. Same data, same training time,
+   should pick up the residual pattern that distinguishes which layer
+   *within* a domain owns the fix.
+2. Multi-token pooling — mean-pool the encoder's last hidden state
+   instead of using `[CLS]` only. Stack-trace tokens carry layer
+   information that `[CLS]` flattens.
+3. LoRA fine-tune the encoder (adds ≈ 1 M trainable params on top of
+   the frozen 110 M).
+
+Start with (1).
 
 ## Concrete examples
 
