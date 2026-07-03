@@ -15,39 +15,25 @@ env/
 .venv/
 .env/
 
-# ── Analysis results (regenerable) ─────────────────────────
-analysis/results/
-
-# ── Memory system data (regenerable) ──────────────────────
-memory/data/
-
-# ── Cross-layer Phase 2 artifacts (regenerable; large) ────
-memory/cross_layer/data/
+# ── Analysis results (regenerable; may be a symlink) ──────
+analysis/results
 
 # ── Dataset data (too large for git; use HuggingFace Hub) ──
-dataset/data/raw/
-dataset/data/processed/
-dataset/data/dataset/
-dataset/data/training/
+# No trailing slashes: entries may be symlinks to a shared data location.
+# All of these are auto-created by the pipeline (mkdir parents=True).
+dataset/data/raw
+dataset/data/processed
+dataset/data/dataset
+dataset/data/training
 dataset/data/index.jsonl
 dataset/data/*.log
 dataset/data/*.db
 
-# ── Keep the data directory structure (not its contents) ──
+# ── Keep the data directory itself ─────────────────────────
 !dataset/data/.gitkeep
-!dataset/data/raw/.gitkeep
-!dataset/data/processed/.gitkeep
-!dataset/data/dataset/.gitkeep
-!dataset/data/training/.gitkeep
 
-# ── Evaluation data (downloaded cases, results, build artifacts) ──
-evaluation/cases/
-evaluation/results/
-evaluation/kernel/
-evaluation/ccache/
-evaluation/rootfs/
-evaluation/workdir/
-evaluation/initramfs.cpio.gz
+# ── MkDocs site build ─────────────────────────────────────
+site/
 
 # ── Editor / OS ───────────────────────────────────────────
 .DS_Store

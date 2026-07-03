@@ -101,6 +101,6 @@ python -m dataset.view diff ea1cd4aa4d1e98458a55
 # Read the review thread that drove the revision
 python -m dataset.view discuss ea1cd4aa4d1e98458a55 -v 1
 
-# Reproduce the crash (see evaluation.md)
+# Reproduce the crash (evaluation harness in the syzfix-research repo)
 python evaluation/reproduce_crash.py ea1cd4aa4d1e98458a55
 ```

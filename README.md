@@ -22,8 +22,12 @@ git clone https://github.com/sysec-uic/syzfix.git
 cd syzfix
 python3 -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+pip install -e .
 ```
+
+The editable install exposes two packages, `dataset` (collection pipeline,
+viewer, HuggingFace sync) and `analysis` (heuristic analyzers), so downstream
+projects can `pip install -e path/to/syzfix` and import them directly.
 
 ---
 
@@ -48,19 +52,20 @@ python -m analysis.run_all
 python -m analysis.run_all --show
 python -m analysis.run_all --show --analyzer revision
 ```
+
+Data lives in `dataset/data/` by default; set `SYZFIX_DATA_DIR` to point at a
+data directory elsewhere (and `SYZFIX_RESULTS_DIR` for saved analyzer results).
+
 ---
 
 ## Documentation
 
 | | |
 |---|---|
-| [**Reproducing without re-crawling**](docs/reproducing.md) | Use the pre-built HF dataset to start training in minutes |
+| [**Reproducing without re-crawling**](docs/reproducing.md) | Use the pre-built HF dataset to start exploring in minutes |
 | [**Exploring the dataset**](docs/exploring.md) | Browse, search, and inspect individual bugs interactively |
 | [**Analysis**](docs/analysis.md) | Heuristic analyzers and the iteration timeline figure |
 | [**Cross-layer analysis**](docs/cross_layer.md) | Cross-layer bugs, stack-overlap verification, kernel layer taxonomy |
-| [**Memory system**](docs/memory.md) | RAG knowledge base for agent-based kernel bug fixing |
-| [**Evaluation**](docs/evaluation.md) | Reproduce crashes, generate fixes, and verify patches end-to-end [TODO: untested] |
-| [**Training guide**](docs/training.md) | SFT, DPO, prompt customisation, TRL examples [TODO: untested] |
 | [**Data collection**](docs/collection.md) | Full crawl pipeline, rate limits, resuming, upload (**optional**) |
 
 ---
@@ -79,7 +84,7 @@ Each entry captures one fixed kernel bug end-to-end:
 | `patch_evolution` | lore.kernel.org | v1 → v2 → … diffs with inline discussions |
 | `discussion` | lore.kernel.org | Full reviewer email threads per version |
 
-**~6,900 bugs** collected, of which ~5,200 have a patch diff and ~5,000 have
+**~7,000 bugs** collected, of which ~5,200 have a patch diff and ~5,000 have
 mailing-list discussions. Up to 9 patch versions captured per bug.
 
 ### Example
@@ -114,13 +119,9 @@ mailing-list discussions. Up to 9 patch versions captured per bug.
 
 ## Project structure
 
-The repository is split into a stable **dataset core**, shared **infrastructure**
-packages (consumed by every paper), and **projects/** — one subdirectory per
-research paper.
-
 ```
-SyzFix/
-├── requirements.txt          # All dependencies (crawler + analysis + memory)
+syzfix/
+├── pyproject.toml            # Installable package: dataset + analysis
 ├── docs/                     # Extended documentation (see table above)
 ├── dataset/                  # Dataset collection, storage, viewer, HF upload
 │   ├── main.py               # collect / export / stats / inspect
@@ -131,55 +132,42 @@ SyzFix/
 │   ├── retry_missing.py      # Retry failed fetches
 │   ├── data/                 # (gitignored) processed/, raw/, training/, index.jsonl
 │   └── scraper/              # syzbot.py, git_kernel.py, lore.py, patchwork.py, stable_cherrypick.py
-├── analysis/                 # Heuristic dataset analysis (shared)
-│   ├── run_all.py            # Run all analyzers
-│   ├── plot_iteration_timeline.py
-│   ├── loader.py, filters.py
-│   └── analyzers/            # revision_reasons, bug_type, fix_pattern, kernel_layers, cross_layer, …
-├── memory/                   # RAG knowledge base for LLM agents (shared)
-│   ├── build.py, retrieve.py, schemas.py, embeddings.py, store.py
-│   ├── knowledge/            # Git-tracked distilled rules and pattern knowledge
-│   └── data/                 # (gitignored) FAISS indices, instance memory, embeddings
-├── evaluation/               # Crash reproduction + agent-fix pipeline (shared)
-│   ├── reproduce_crash.py, generate_fix.py, run_eval.py, fetch_cases.py
-│   ├── agents/               # claude_code, opencode, codex adapters
-│   ├── scripts/, docker/     # Host & container build scripts
-│   └── cases/, kernel/, ccache/, results/   # (gitignored) build + run artifacts
-├── training/                 # Training-data prep + fine-tuning (shared)
-│   ├── prepare_training.py   # Processed data → training JSONL (5 tasks + crash_to_patch_location)
-│   ├── training_config.py    # Prompt templates and task definitions
-│   ├── train_patch_location.py, eval_patch_location.py
-├── projects/                 # One subdirectory per research paper
-│   ├── cross-layer/          # Cross-layer bug analysis + patch-location paper
-│   └── patch-evolution/      # SyzFix dataset + memory-augmented fixing paper
-└── tests/
-    └── test_memory_retrieval.py   # End-to-end retrieval demo & test
+└── analysis/                 # Heuristic dataset analysis
+    ├── run_all.py            # Run all analyzers
+    ├── plot_iteration_timeline.py
+    ├── loader.py, filters.py, paths.py
+    └── analyzers/            # revision_reasons, bug_type, fix_pattern, kernel_layers, cross_layer, …
 ```
 
-## Research projects
-
-| Project | Topic |
-|---|---|
-| [`projects/cross-layer/`](projects/cross-layer/) | Cross-layer bugs: taxonomy, patch-location prediction |
-| [`projects/patch-evolution/`](projects/patch-evolution/) | Dataset overview + memory-augmented bug-fix lifecycle |
-
-Shared code lives at the repo root; each project's `README.md` lists which
-shared packages it consumes.
+Downstream research built on this dataset — the RAG memory system for
+LLM-agent kernel bug fixing, crash-reproduction/evaluation harness, and
+fine-tuning recipes — lives in a separate research repository that consumes
+this package via `pip install`.
 
 ---
 
 ## Cross-layer analysis
 
 Some kernel bugs crash in one architectural layer but need to be fixed in another.
-Of 4,983 analyzed bugs, **466 (9.4%) are cross-layer** — and of those,
-**130 (27.9%) have the fix completely off the crash stack**, making them the
-hardest cases for LLM-based bug localization.
+Of 5,067 analyzed bugs, **574 (11.3%) are cross-layer** and a further
+**465 (9.2%) are cross-domain**; among the cross-layer bugs, **215 (37.5%)
+have the fix completely off the crash stack**, making them the hardest cases
+for LLM-based bug localization.
 
 ```bash
 python -m dataset.view stats                    # full breakdown
-python -m dataset.view list --true-cross-layer   # the 130 hardest cases
+python -m dataset.view list --true-cross-layer   # the hardest cases
 python -m dataset.view crosslayer <bug_id>       # per-bug analysis
 ```
 
 → **[Full documentation](docs/cross_layer.md)**: dataset breakdown, stack-overlap
 verification, kernel layer taxonomy, examples, and all commands.
+
+---
+
+## License
+
+Code is released under the [MIT License](LICENSE). The dataset aggregates
+publicly available content from syzbot, lore.kernel.org, and git.kernel.org;
+see the [HuggingFace dataset card](https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset)
+for details.

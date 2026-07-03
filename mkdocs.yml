@@ -1,0 +1,49 @@
+site_name: SyzFix
+site_description: A full-lifecycle dataset of fixed Linux kernel bugs from syzbot
+site_url: https://sysec-uic.github.io/syzfix/
+repo_url: https://github.com/sysec-uic/syzfix
+repo_name: sysec-uic/syzfix
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - toc.integrate
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Reproducing without re-crawling: reproducing.md
+  - Exploring the dataset: exploring.md
+  - Analysis: analysis.md
+  - Cross-layer analysis: cross_layer.md
+  - Data collection: collection.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/sysec-uic/syzfix
+    - icon: simple/huggingface
+      link: https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset

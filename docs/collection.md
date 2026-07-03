@@ -50,19 +50,9 @@ them support per-bug incremental updates — they rebuild from the full corpus):
    ```bash
    python -m analysis.run_all
    ```
-3. **Rebuild training JSONLs**
-   ```bash
-   python -m dataset.prepare_training --tasks all
-   ```
-4. **Rebuild the memory index**
-   ```bash
-   # Fast path — structured data + trajectories + rules (~3 min)
-   python -m memory.build --skip-embeddings
-
-   # Full rebuild with FAISS embeddings (~50 min CPU)
-   python -m memory.build
-   ```
-5. **Re-upload to HuggingFace**
+3. **Rebuild downstream artifacts** — training JSONLs and the memory index
+   are rebuilt from the research repo (**syzfix-research**); see its README.
+4. **Re-upload to HuggingFace**
    ```bash
    python -m dataset.upload_hf --repo xiaoguangwang/syzfix-dataset
    python -m dataset.upload_hf --repo xiaoguangwang/syzfix-dataset --training

@@ -47,11 +47,8 @@ Do this to change prompt templates, add new tasks, or filter bugs differently.
 # Download and unpack the full per-bug JSON files
 python -m dataset.restore_processed --repo xiaoguangwang/syzfix-dataset
 
-# Regenerate all training tasks
-python -m training.prepare_training --tasks all
-
-# Or a specific task
-python -m training.prepare_training --tasks bug_to_patch
+# Regenerate training tasks (from the syzfix-research repo, which
+# consumes this package): python -m training.prepare_training --tasks all
 ```
 
 `restore_processed` streams the file line-by-line — constant RAM usage.

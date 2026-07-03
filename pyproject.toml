@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "syzfix"
+version = "0.1.0"
+description = "SyzFix: a full-lifecycle dataset of fixed Linux kernel bugs from syzbot, with collection pipeline and heuristic analyzers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Xiaoguang Wang", email = "xgwang9@uic.edu" },
+]
+keywords = ["linux-kernel", "syzbot", "syzkaller", "bug-fixing", "dataset", "llm"]
+classifiers = [
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "aiohttp>=3.9.0",
+    "aiohttp-retry>=2.8.0",
+    "aiolimiter>=1.1.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "click>=8.1.0",
+    "tqdm>=4.66.0",
+    "datasets>=2.16.0",
+    "pyarrow>=14.0.0",
+    "huggingface_hub>=0.20.0",
+    "pandas>=2.1.0",
+    "matplotlib>=3.8.0",
+    "numpy>=1.26.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/sysec-uic/syzfix"
+Dataset = "https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset"
+
+[tool.setuptools]
+packages = { find = { include = ["dataset*", "analysis*"] } }
