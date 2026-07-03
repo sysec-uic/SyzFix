@@ -23,6 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from analysis.loader import load_all_bugs, bugs_with_evolution, bugs_with_discussion
+from analysis.paths import RESULTS_DIR
 from analysis.analyzers.base import AnalysisResult
 from analysis.analyzers.revision_reasons import RevisionReasonsAnalyzer
 from analysis.analyzers.discussion_lessons import DiscussionLessonsAnalyzer
@@ -255,7 +256,7 @@ Examples:
 
     args = parser.parse_args()
 
-    output_dir = Path(args.output_dir) if args.output_dir else Path(__file__).resolve().parent / "results"
+    output_dir = Path(args.output_dir) if args.output_dir else RESULTS_DIR
     analyzer_names = [args.analyzer] if args.analyzer else list(ANALYZERS.keys())
 
     if args.list:

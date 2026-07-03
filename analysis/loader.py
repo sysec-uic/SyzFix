@@ -13,8 +13,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional
 
-# Path to the processed data directory
-DATA_DIR = Path(__file__).resolve().parent.parent / "dataset" / "data" / "processed"
+from dataset.config import PROCESSED_DIR
+
+# Path to the processed data directory (honors SYZFIX_DATA_DIR via dataset.config)
+DATA_DIR = PROCESSED_DIR
 
 
 @dataclass

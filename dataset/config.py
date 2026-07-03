@@ -1,16 +1,20 @@
 """Configuration for syzbot dataset builder."""
 
+import os
 from pathlib import Path
 
 # === Project paths ===
 PROJECT_ROOT = Path(__file__).parent
-DATA_DIR = PROJECT_ROOT / "data"
+# Data root. Defaults to dataset/data inside this repo; set SYZFIX_DATA_DIR
+# when the data lives elsewhere (e.g. consuming this package from another repo).
+DATA_DIR = Path(os.environ.get("SYZFIX_DATA_DIR", PROJECT_ROOT / "data"))
 RAW_DIR = DATA_DIR / "raw"
 RAW_SYZBOT_DIR = RAW_DIR / "syzbot"
 RAW_PATCHES_DIR = RAW_DIR / "patches"
 RAW_DISCUSSIONS_DIR = RAW_DIR / "discussions"
 PROCESSED_DIR = DATA_DIR / "processed"
 DATASET_DIR = DATA_DIR / "dataset"
+TRAINING_DIR = DATA_DIR / "training"
 DB_PATH = DATA_DIR / "progress.db"
 
 # === Syzbot API ===
