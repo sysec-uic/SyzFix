@@ -369,7 +369,7 @@ def upload_processed(repo_id: str, private: bool = False, dry_run: bool = False)
     print(f"\nProcessed data uploaded!")
     print(f"  https://huggingface.co/datasets/{repo_id}/tree/main/processed")
     print(f"\nCollaborators can restore it with:")
-    print(f'  python restore_processed.py --repo {repo_id}')
+    print(f'  python -m dataset.restore_processed --repo {repo_id}')
 
 
 def upload_memory(repo_id: str, private: bool = False, dry_run: bool = False):
