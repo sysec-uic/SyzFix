@@ -104,6 +104,7 @@ predicts the *(domain, layer)* where the fix will land:
 Top-3 covering 94% of bugs means a predicted layer prior can cut the search
 space for downstream patch-localization agents by an order of magnitude.
 -->
+
 ## Start in minutes
 
 ```bash
@@ -125,14 +126,17 @@ python -m dataset.view list
   inspect individual bugs from the CLI
 - :material-chart-box: **[Analysis](analysis.md)** — 13 heuristic analyzers
   over the full corpus
-- :material-layers-triple: **[Cross-layer](cross_layer.md)** — taxonomy,
-  stack-overlap verification, hard-case mining
 - :material-cloud-download: **[Collection](collection.md)** — the crawl
   pipeline, rate limits, incremental updates
 - :simple-huggingface: **[Dataset card](https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset)**
-  — schema, splits, and download options
+  — schema, splits, and download options (HF link)
 
 </div>
+
+<!--
+- :material-layers-triple: **[Cross-layer](cross_layer.md)** — taxonomy,
+  stack-overlap verification, hard-case mining
+-->
 
 ## Citation & contact
 
