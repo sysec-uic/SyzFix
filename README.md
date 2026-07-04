@@ -84,8 +84,9 @@ Each entry captures one fixed kernel bug end-to-end:
 | `patch_evolution` | lore.kernel.org | v1 → v2 → … diffs with inline discussions |
 | `discussion` | lore.kernel.org | Full reviewer email threads per version |
 
-**~7,000 bugs** collected, of which ~5,200 have a patch diff and ~5,000 have
-mailing-list discussions. Up to 9 patch versions captured per bug.
+**7,067 bugs** collected, of which 5,127 have a patch diff, 6,057 have
+mailing-list discussions, and 4,742 have a C reproducer. Up to 9 patch
+versions captured per bug.
 
 ### Example
 

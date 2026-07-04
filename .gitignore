@@ -26,6 +26,7 @@ dataset/data/processed
 dataset/data/dataset
 dataset/data/training
 dataset/data/index.jsonl
+dataset/data/.cache
 dataset/data/*.log
 dataset/data/*.db
 

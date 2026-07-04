@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -390,11 +391,15 @@ def upload_memory(repo_id: str, private: bool = False, dry_run: bool = False):
         memory/faiss_patch.index        - FAISS patch index
         memory/bug_id_map.json          - embedding ID mapping
     """
-    # Memory data directory
-    memory_dir = Path(__file__).resolve().parent.parent / "memory" / "data"
+    # Memory data directory — built in the syzfix-research repo. Defaults to
+    # memory/data under the current working directory (i.e. run this from the
+    # research repo root); SYZFIX_MEMORY_DIR overrides.
+    memory_dir = Path(os.environ.get("SYZFIX_MEMORY_DIR", Path.cwd() / "memory" / "data"))
     if not memory_dir.exists():
         print(f"Memory data not found at {memory_dir}")
-        print("Run: python -m memory.build")
+        print("Memory artifacts are built in the syzfix-research repo "
+              "(python -m memory.build); run this command from its root "
+              "or set SYZFIX_MEMORY_DIR.")
         return
 
     # Files to upload (order: large → small for progress visibility)

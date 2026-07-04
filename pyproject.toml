@@ -34,6 +34,12 @@ dependencies = [
     "numpy>=1.26.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "mkdocs-material>=9.5",
+]
+
 [project.urls]
 Homepage = "https://github.com/sysec-uic/syzfix"
 Dataset = "https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset"

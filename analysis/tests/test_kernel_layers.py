@@ -109,13 +109,24 @@ def test_classify_file_layer():
 
 
 def test_unclassified_returns_none():
-    # Paths outside every domain should be unclassified.
-    assert classify_file_layer("kernel/sched/core.c") is None
+    # Paths outside every domain should be unclassified. (kernel/* and
+    # arch/* now classify — the kernel and arch domains were added to the
+    # taxonomy — so use paths that no domain claims.)
     assert classify_file_layer("lib/string.c") is None
-    assert classify_file_layer("arch/x86/kernel/head_64.S") is None
+    assert classify_file_layer("init/main.c") is None
+    assert classify_file_layer("scripts/checkpatch.pl") is None
+    assert classify_file_layer("Documentation/admin-guide/index.rst") is None
+
+
+def test_kernel_and_arch_domains_classify():
+    # Regression companions for the above: these moved from unclassified to
+    # their own domains when the taxonomy grew.
+    assert classify_file_layer("kernel/sched/core.c") == ("kernel", "kernel core", 0)
+    assert classify_file_layer("arch/x86/kernel/head_64.S") == ("arch", "arch", 0)
 
 
 if __name__ == "__main__":
     test_classify_file_layer()
     test_unclassified_returns_none()
+    test_kernel_and_arch_domains_classify()
     print("ok")

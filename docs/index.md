@@ -14,10 +14,11 @@ commit.
 
 | | |
 |---|---|
-| Fixed kernel bugs collected | **~7,000** |
-| … with the merged patch diff | ~5,200 |
-| … with full mailing-list discussions | ~5,000 |
-| … with a C reproducer | ~2,600 |
+| Fixed kernel bugs collected | **7,067** |
+| … with the merged patch diff | 5,127 |
+| … with full mailing-list discussions | 6,057 |
+| … with a C reproducer | 4,742 |
+| … with multi-version patch evolution | 1,117 |
 | Patch versions captured per bug | up to 9 (v1 → v2 → … → merged) |
 
 Each entry captures one bug end-to-end: the raw crash report (oops / KASAN /

@@ -90,7 +90,7 @@ networking-L2, never device-L2) and within a domain it is **two-pass**: explicit
 `path_prefixes` beat catch-all `path_patterns` regardless of level.
 
 > Layer definitions are hard-coded as Python dataclasses in
-> [`analysis/analyzers/kernel_layers.py`](../analysis/analyzers/kernel_layers.py)
+> [`analysis/analyzers/kernel_layers.py`](https://github.com/sysec-uic/syzfix/blob/main/analysis/analyzers/kernel_layers.py)
 > — `KernelLayer`, `SubsystemDomain`, the 13 domain instances, the `DOMAINS`
 > ordered list, and the public `classify_file_layer()` function. The data is
 > declarative (lists of strings + regex), so a future YAML/JSON migration would

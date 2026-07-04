@@ -16,9 +16,9 @@ Usage:
     python view.py discuss <bug_id>           # discussion thread
     python view.py diff <bug_id>              # side-by-side v1 vs final patch
     python view.py random                     # show a random interesting bug
-    python view.py list --cross-layer         # only cross-layer bugs (466)
+    python view.py list --cross-layer         # only cross-layer bugs (574)
     python view.py list --cross-layer --verify-stack  # show on/off-stack status
-    python view.py list --true-cross-layer    # fix NOT on crash stack (130, hardest)
+    python view.py list --true-cross-layer    # fix NOT on crash stack (215, hardest)
     python view.py crosslayer <bug_id>        # cross-layer analysis for one bug
     python view.py stats                      # dataset & cross-layer statistics
 
