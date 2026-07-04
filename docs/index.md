@@ -13,11 +13,11 @@ lore.kernel.org, to the commit merged into `torvalds/linux`.
 </div>
 
 <div class="sf-stats" markdown>
-  <div class="sf-stat"><span class="num">7,091</span><span class="label">fixed kernel bugs</span></div>
-  <div class="sf-stat"><span class="num">5,127</span><span class="label">merged patch diffs</span></div>
-  <div class="sf-stat"><span class="num">6,057</span><span class="label">review discussions</span></div>
-  <div class="sf-stat"><span class="num">4,742</span><span class="label">C reproducers</span></div>
-  <div class="sf-stat"><span class="num">1,117</span><span class="label">multi-version patch histories</span></div>
+  <div class="sf-stat"><span class="num">7,210</span><span class="label">fixed kernel bugs</span></div>
+  <div class="sf-stat"><span class="num">5,204</span><span class="label">merged patch diffs</span></div>
+  <div class="sf-stat"><span class="num">6,191</span><span class="label">review discussions</span></div>
+  <div class="sf-stat"><span class="num">4,802</span><span class="label">C reproducers</span></div>
+  <div class="sf-stat"><span class="num">1,157</span><span class="label">multi-version patch histories</span></div>
   <div class="sf-stat"><span class="num">≤9</span><span class="label">patch versions per bug</span></div>
 </div>
 
@@ -76,16 +76,16 @@ hundreds of days in syzbot's early years to weeks.*
 
 Some kernel bugs crash in one architectural layer but must be fixed in
 another (a fuse crash fixed in VFS core; an interrupt-context fault fixed in
-TCP/TLS state handling). Classifying all 5,067 analyzable bugs against a
+TCP/TLS state handling). Classifying all 5,145 analyzable bugs against a
 13-domain / 3-level kernel-layer taxonomy:
 
 | Relation | Share | Meaning |
 |---|---|---|
 | same-layer | 79.5% | fix lands where the crash occurred |
-| **cross-layer** | **11.3%** | fix in a different layer of the same domain |
-| **cross-domain** | **9.2%** | fix in an entirely different subsystem |
+| **cross-layer** | **11.4%** | fix in a different layer of the same domain |
+| **cross-domain** | **9.1%** | fix in an entirely different subsystem |
 
-Among cross-layer bugs, **37.5% have the fix completely off the crash
+Among cross-layer bugs, **37% have the fix completely off the crash
 stack** — stack-following heuristics (and stack-following LLM agents)
 cannot localize them. [Full analysis →](cross_layer.md)
 

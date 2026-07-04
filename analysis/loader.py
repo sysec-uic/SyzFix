@@ -196,11 +196,22 @@ class BugEntry:
 
 
 def load_bug_file(fname: Path) -> Optional[BugEntry]:
-    """Load a single processed bug JSON file (None on decode error)."""
+    """Load a single processed bug JSON file (None on decode error).
+
+    A MemoryError (e.g. a pathologically large bug file on a memory-tight
+    machine) skips the file with a warning instead of killing a whole
+    multi-analyzer run partway through.
+    """
     with open(fname, 'r', encoding='utf-8', errors='replace') as f:
         try:
             raw = json.load(f)
         except json.JSONDecodeError:
+            return None
+        except MemoryError:
+            import sys
+            print(f"WARNING: skipping {fname.name} "
+                  f"({fname.stat().st_size / 1_048_576:.0f} MB): "
+                  f"not enough memory to parse it", file=sys.stderr)
             return None
     return BugEntry(
         bug_id=raw.get("bug_id", fname.stem),

@@ -141,9 +141,9 @@ Each entry captures one fixed kernel bug end-to-end:
 | `patch_evolution` | lore.kernel.org | v1 → v2 → … diffs with inline discussions |
 | `discussion` | lore.kernel.org | Full reviewer email threads per version |
 
-**7,000+ bugs** collected (7,091 as of July 2026 — the dataset grows with
-each `dataset.update` run), of which 5,127 have a patch diff, 6,057 have
-mailing-list discussions, and 4,742 have a C reproducer. Up to 9 patch
+**7,000+ bugs** collected (7,210 as of July 2026 — the dataset grows with
+each `dataset.update` run), of which 5,204 have a patch diff, 6,191 have
+mailing-list discussions, and 4,802 have a C reproducer. Up to 9 patch
 versions captured per bug.
 
 ### Example
@@ -208,8 +208,8 @@ this package via `pip install`.
 ## Cross-layer analysis
 
 Some kernel bugs crash in one architectural layer but need to be fixed in another.
-Of 5,067 analyzed bugs, **574 (11.3%) are cross-layer** and a further
-**465 (9.2%) are cross-domain**; among the cross-layer bugs, **215 (37.5%)
+Of 5,145 analyzed bugs, **586 (11.4%) are cross-layer** and a further
+**470 (9.1%) are cross-domain**; among the cross-layer bugs, **217 (37.0%)
 have the fix completely off the crash stack**, making them the hardest cases
 for LLM-based bug localization.
 
