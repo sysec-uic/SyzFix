@@ -1,0 +1,37 @@
+/* Landing-page stat tiles */
+.sf-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.8rem;
+  margin: 1.2rem 0 1.6rem;
+}
+.sf-stat {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.4rem;
+  padding: 0.9rem 0.6rem 0.7rem;
+  text-align: center;
+  background: var(--md-code-bg-color);
+}
+.sf-stat .num {
+  display: block;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--md-primary-fg-color);
+  line-height: 1.15;
+}
+.sf-stat .label {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.66rem;
+  opacity: 0.75;
+}
+
+/* Slightly tighter hero */
+.sf-hero {
+  text-align: center;
+  margin: 0.5rem 0 1.5rem;
+}
+.sf-hero p {
+  max-width: 34rem;
+  margin: 0.6rem auto 1rem;
+}

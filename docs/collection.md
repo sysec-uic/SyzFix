@@ -44,6 +44,20 @@ python -m dataset.update --repo … --dry-run       # show upload stats, upload 
 python -m dataset.update --repo … --force-upload  # upload even with 0 new bugs
 ```
 
+When no new bugs landed on syzbot, the run costs a single API request and
+exits — cheap enough to schedule. `scripts/cron_update.sh` wraps the command
+for cron (logs to `dataset/data/cron_update.log`); install it on the machine
+that holds the data, e.g. weekly on Monday 06:00:
+
+```cron
+0 6 * * 1 SYZFIX_PYTHON=/path/to/venv/bin/python /path/to/syzfix/scripts/cron_update.sh
+```
+
+Run it on the data-holding machine rather than GitHub Actions: the runner is
+stateless, so it would have to restore the full corpus (~2 GB download,
+~11 GB unpacked) and re-upload it on every run just to fetch a handful of
+new bugs.
+
 ### What it does under the hood
 
 The crawler is incremental by default: it refetches the current syzbot

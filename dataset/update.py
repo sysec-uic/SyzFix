@@ -75,6 +75,14 @@ def main():
     new_bugs = after - before
     print(f"\nProcessed bugs: {after} total ({new_bugs:+d} this run)")
 
+    # Nothing new → nothing to rebuild or upload. --force-upload overrides
+    # (e.g. after retry_missing backfilled data without adding bugs);
+    # --dry-run still walks the remaining steps to show what would happen.
+    if new_bugs == 0 and not args.force_upload and not args.dry_run:
+        print("No new bugs — index, analyzers and upload all skipped. "
+              "Use --force-upload to rebuild and upload anyway.")
+        return
+
     # ── 2. Rebuild the lightweight viewer index ───────────────────────────
     _run_module("dataset.view", "build-index")
 
@@ -87,10 +95,6 @@ def main():
     # ── 4. Upload to HuggingFace ──────────────────────────────────────────
     if not args.repo:
         print("\nNo --repo given — local update finished, nothing uploaded.")
-        return
-    if new_bugs == 0 and not args.force_upload and not args.dry_run:
-        print("\nNo new bugs this run — skipping upload. "
-              "Use --force-upload to upload anyway.")
         return
 
     from .upload_hf import upload, upload_processed, _write_restore_script

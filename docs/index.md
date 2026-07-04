@@ -1,33 +1,36 @@
 # SyzFix
 
-**A full-lifecycle dataset of fixed Linux kernel bugs**, collected from
-[syzbot](https://syzkaller.appspot.com/upstream/fixed) — from the initial crash
-report through patch iterations and reviewer discussions to the final merged
-commit.
+<div class="sf-hero" markdown>
 
-[:simple-huggingface: Dataset on HuggingFace](https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset){ .md-button .md-button--primary }
-[:simple-github: Code on GitHub](https://github.com/sysec-uic/syzfix){ .md-button }
+**The full lifecycle of 7,000+ fixed Linux kernel bugs** — from the syzbot
+crash report, through every patch revision and reviewer discussion on
+lore.kernel.org, to the commit merged into `torvalds/linux`.
+
+[:simple-huggingface: Get the dataset](https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset){ .md-button .md-button--primary }
+[:simple-github: Browse the code](https://github.com/sysec-uic/syzfix){ .md-button }
+[Quick start :material-arrow-down:](#start-in-minutes){ .md-button }
+
+</div>
+
+<div class="sf-stats" markdown>
+  <div class="sf-stat"><span class="num">7,091</span><span class="label">fixed kernel bugs</span></div>
+  <div class="sf-stat"><span class="num">5,127</span><span class="label">merged patch diffs</span></div>
+  <div class="sf-stat"><span class="num">6,057</span><span class="label">review discussions</span></div>
+  <div class="sf-stat"><span class="num">4,742</span><span class="label">C reproducers</span></div>
+  <div class="sf-stat"><span class="num">1,117</span><span class="label">multi-version patch histories</span></div>
+  <div class="sf-stat"><span class="num">≤9</span><span class="label">patch versions per bug</span></div>
+</div>
+
+*Counts as of July 2026 — the dataset tracks syzbot continuously and grows
+with each incremental update.*
 
 ---
 
-## The dataset at a glance
+## One record = one bug's whole story
 
-| | |
-|---|---|
-| Fixed kernel bugs collected | **7,091** |
-| … with the merged patch diff | 5,127 |
-| … with full mailing-list discussions | 6,057 |
-| … with a C reproducer | 4,742 |
-| … with multi-version patch evolution | 1,117 |
-| Patch versions captured per bug | up to 9 (v1 → v2 → … → merged) |
-
-*As of July 2026 — the dataset tracks syzbot continuously and grows with each
-incremental update.*
-
-Each entry captures one bug end-to-end: the raw crash report (oops / KASAN /
-BUG), syzkaller and C reproducers, every patch revision posted to
-lore.kernel.org with its inline review discussion, and the final commit merged
-into `torvalds/linux`.
+Most kernel-bug datasets stop at (crash, final patch). SyzFix keeps the
+process in between — the part that shows *how* maintainers actually converge
+on a fix:
 
 ```
 [Sep 16, 2024]  syzbot: NULL pointer deref in filemap_read_folio
@@ -38,7 +41,34 @@ into `torvalds/linux`.
 [Final]         Commit 416a8b2c merged into torvalds/linux
 ```
 
----
+Each entry carries the raw crash report (oops / KASAN / BUG), syzkaller and C
+reproducers, every patch revision with its inline review thread, and the
+final merged commit — aligned and machine-readable.
+
+## How it's built
+
+```mermaid
+flowchart LR
+    SYZ["syzbot<br/>bug list, crashes,<br/>reproducers"] --> P[collection<br/>pipeline]
+    LORE["lore.kernel.org<br/>patch versions,<br/>review threads"] --> P
+    GIT["git.kernel.org<br/>merged diffs"] --> P
+    PW["patchwork<br/>series fallback"] --> P
+    P --> PROC[("processed/<br/>one JSON per bug")]
+    PROC --> AN["13 heuristic<br/>analyzers"]
+    PROC --> HF[("HuggingFace<br/>Hub")]
+    AN --> STATS["cross-layer taxonomy,<br/>fix patterns, difficulty…"]
+```
+
+The pipeline is resumable and incremental: a weekly
+`python -m dataset.update` pulls only the bugs fixed since the last run and
+pushes the refreshed dataset to HuggingFace.
+[Data collection →](collection.md)
+
+![Average patch-iteration duration per year, stacked by revision stage, with the number of analyzed bugs overlaid](assets/iteration_timeline.png)
+
+*Average time spent in each revision stage (report → v1 → v2 → …) per year,
+with the volume of analyzed bugs overlaid. Fix turnaround has dropped from
+hundreds of days in syzbot's early years to weeks.*
 
 ## Preliminary findings
 
@@ -73,8 +103,6 @@ predicts the *(domain, layer)* where the fix will land:
 Top-3 covering 94% of bugs means a predicted layer prior can cut the search
 space for downstream patch-localization agents by an order of magnitude.
 
----
-
 ## Start in minutes
 
 ```bash
@@ -88,10 +116,22 @@ python -m dataset.view build-index
 python -m dataset.view list
 ```
 
-See [Reproducing without re-crawling](reproducing.md) for the full guide, or
-[Data collection](collection.md) to re-crawl from scratch.
+<div class="grid cards" markdown>
 
----
+- :material-download: **[Reproducing](reproducing.md)** — use the pre-built
+  HF dataset, no crawling required
+- :material-magnify: **[Exploring](exploring.md)** — browse, search, and
+  inspect individual bugs from the CLI
+- :material-chart-box: **[Analysis](analysis.md)** — 13 heuristic analyzers
+  over the full corpus
+- :material-layers-triple: **[Cross-layer](cross_layer.md)** — taxonomy,
+  stack-overlap verification, hard-case mining
+- :material-cloud-download: **[Collection](collection.md)** — the crawl
+  pipeline, rate limits, incremental updates
+- :simple-huggingface: **[Dataset card](https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset)**
+  — schema, splits, and download options
+
+</div>
 
 ## Citation & contact
 
