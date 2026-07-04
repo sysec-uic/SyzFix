@@ -52,7 +52,6 @@ nav:
   - Reproducing without re-crawling: reproducing.md
   - Exploring the dataset: exploring.md
   - Analysis: analysis.md
-  - Cross-layer analysis: cross_layer.md
   - Data collection: collection.md
 
 extra:
