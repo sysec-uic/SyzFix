@@ -64,6 +64,7 @@ The pipeline is resumable and incremental: a weekly
 pushes the refreshed dataset to HuggingFace.
 [Data collection →](collection.md)
 
+<!--
 ![Average patch-iteration duration per year, stacked by revision stage, with the number of analyzed bugs overlaid](assets/iteration_timeline.png)
 
 *Average time spent in each revision stage (report → v1 → v2 → …) per year,
@@ -102,7 +103,7 @@ predicts the *(domain, layer)* where the fix will land:
 
 Top-3 covering 94% of bugs means a predicted layer prior can cut the search
 space for downstream patch-localization agents by an order of magnitude.
-
+-->
 ## Start in minutes
 
 ```bash
