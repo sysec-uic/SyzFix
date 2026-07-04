@@ -29,6 +29,7 @@ import logging
 import os
 from dataclasses import asdict
 from pathlib import Path
+from . import config
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
