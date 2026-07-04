@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analysis.loader import load_all_bugs, BugEntry
+from analysis.loader import DATA_DIR, load_bug_file, BugEntry
 from analysis.filters import (
     get_human_reviews, get_review_text, is_stable_backport_thread,
     parse_stack_trace,
@@ -198,25 +198,25 @@ def main():
         parser.print_help()
         return
 
-    # Load all bugs and index by ID
-    print("Loading dataset...")
-    all_bugs = load_all_bugs()
-    bug_index = {b.bug_id: b for b in all_bugs}
-
+    # Resolve IDs against the per-bug files directly — no need to load the
+    # whole corpus to look up a handful of bugs.
     found = 0
     for bid in bug_ids:
-        # Support partial ID matching
-        bug = bug_index.get(bid)
-        if bug is None:
-            matches = [b for b in all_bugs if b.bug_id.startswith(bid)]
+        # Support partial ID matching via filename prefix
+        exact = DATA_DIR / f"{bid}.json"
+        if exact.exists():
+            bug = load_bug_file(exact)
+        else:
+            bug = None
+            matches = sorted(DATA_DIR.glob(f"{bid}*.json"))
             if len(matches) == 1:
-                bug = matches[0]
+                bug = load_bug_file(matches[0])
             elif len(matches) > 1:
-                print(f"\nAmbiguous ID '{bid}', matches: {[m.bug_id for m in matches[:5]]}")
+                print(f"\nAmbiguous ID '{bid}', matches: {[m.stem for m in matches[:5]]}")
                 continue
-            else:
-                print(f"\nBug '{bid}' not found")
-                continue
+        if bug is None:
+            print(f"\nBug '{bid}' not found")
+            continue
 
         found += 1
         narrative = generate_narrative(bug)

@@ -25,6 +25,12 @@ python -m analysis.run_all --show
 python -m analysis.run_all --show --analyzer revision
 ```
 
+By default the corpus is **streamed from disk** — each analyzer pass re-parses
+the JSON files, keeping peak memory at roughly the largest single bug file.
+On a machine with plenty of RAM, `--in-memory` preloads everything once and
+runs all analyzers much faster (the parsed corpus needs ~2-3x its on-disk
+size, i.e. ~30 GB at 7k bugs).
+
 | Analyzer | What it answers |
 |----------|----------------|
 | `revision` | Why do patches need revision? (12 categories: correctness, incomplete fix, race condition, style, …) |

@@ -22,7 +22,10 @@ from pathlib import Path
 # Add parent dir to path so we can import the analysis package
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from analysis.loader import load_all_bugs, bugs_with_evolution, bugs_with_discussion
+from analysis.loader import (
+    LazyBugs, load_all_bugs, load_bug_file,
+    bugs_with_evolution, bugs_with_discussion,
+)
 from analysis.paths import RESULTS_DIR
 from analysis.analyzers.base import AnalysisResult
 from analysis.analyzers.revision_reasons import RevisionReasonsAnalyzer
@@ -253,6 +256,12 @@ Examples:
         action="store_true",
         help="Print previously saved results without re-running analysis",
     )
+    parser.add_argument(
+        "--in-memory",
+        action="store_true",
+        help="Preload the full corpus into RAM instead of streaming from disk "
+             "(faster for a full run, needs ~2-3x the on-disk JSON size in RAM)",
+    )
 
     args = parser.parse_args()
 
@@ -273,21 +282,30 @@ Examples:
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load data
-    print("Loading dataset...")
-    t0 = time.time()
-    bugs = load_all_bugs()
-    elapsed = time.time() - t0
-    print(f"  Loaded {len(bugs)} bugs in {elapsed:.1f}s")
-
+    # Load data. Default is a lazy view that re-streams the JSON files from
+    # disk on every analyzer pass — slower for a full run (one parse of the
+    # corpus per analyzer) but bounded memory. --in-memory preloads everything
+    # for speed; the parsed corpus needs ~2-3x its on-disk size in RAM.
     if args.sample:
-        bugs = random.sample(bugs, min(args.sample, len(bugs)))
+        files = sorted(LazyBugs().data_dir.glob("*.json"))
+        picked = random.sample(files, min(args.sample, len(files)))
+        bugs = [b for b in map(load_bug_file, picked) if b is not None]
         print(f"  Sampled {len(bugs)} bugs for analysis")
+    elif args.in_memory:
+        print("Loading dataset into memory...")
+        t0 = time.time()
+        bugs = load_all_bugs()
+        print(f"  Loaded {len(bugs)} bugs in {time.time() - t0:.1f}s")
+    else:
+        bugs = LazyBugs()
+        print(f"Streaming {len(bugs)} bugs from disk "
+              f"(bounded memory; pass --in-memory to preload for speed)")
 
-    multi = bugs_with_evolution(bugs)
-    disc = bugs_with_discussion(bugs)
-    print(f"  Bugs with multiple patch versions: {len(multi)}")
-    print(f"  Bugs with discussion: {len(disc)}")
+    if isinstance(bugs, list):
+        multi = bugs_with_evolution(bugs)
+        disc = bugs_with_discussion(bugs)
+        print(f"  Bugs with multiple patch versions: {len(multi)}")
+        print(f"  Bugs with discussion: {len(disc)}")
 
     # Run analyzers
     run_analysis(analyzer_names, bugs, output_dir)

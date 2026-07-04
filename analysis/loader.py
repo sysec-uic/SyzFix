@@ -195,36 +195,65 @@ class BugEntry:
         return "unknown"
 
 
+def load_bug_file(fname: Path) -> Optional[BugEntry]:
+    """Load a single processed bug JSON file (None on decode error)."""
+    with open(fname, 'r', encoding='utf-8', errors='replace') as f:
+        try:
+            raw = json.load(f)
+        except json.JSONDecodeError:
+            return None
+    return BugEntry(
+        bug_id=raw.get("bug_id", fname.stem),
+        title=raw.get("title", ""),
+        raw=raw,
+    )
+
+
 def load_all_bugs(data_dir: Path = DATA_DIR) -> list[BugEntry]:
-    """Load all processed bug JSON files."""
+    """Load all processed bug JSON files into memory.
+
+    The parsed corpus needs roughly 2-3x the on-disk JSON size in RAM
+    (~30 GB at 7k bugs); prefer LazyBugs when that doesn't comfortably fit.
+    """
     bugs = []
     for fname in sorted(data_dir.glob("*.json")):
-        with open(fname, 'r', encoding='utf-8', errors='replace') as f:
-            try:
-                raw = json.load(f)
-            except json.JSONDecodeError:
-                continue
-        bugs.append(BugEntry(
-            bug_id=raw.get("bug_id", fname.stem),
-            title=raw.get("title", ""),
-            raw=raw,
-        ))
+        bug = load_bug_file(fname)
+        if bug is not None:
+            bugs.append(bug)
     return bugs
 
 
 def iter_bugs(data_dir: Path = DATA_DIR) -> Iterator[BugEntry]:
     """Iterate over all bugs without loading all into memory at once."""
     for fname in sorted(data_dir.glob("*.json")):
-        with open(fname, 'r', encoding='utf-8', errors='replace') as f:
-            try:
-                raw = json.load(f)
-            except json.JSONDecodeError:
-                continue
-        yield BugEntry(
-            bug_id=raw.get("bug_id", fname.stem),
-            title=raw.get("title", ""),
-            raw=raw,
-        )
+        bug = load_bug_file(fname)
+        if bug is not None:
+            yield bug
+
+
+class LazyBugs:
+    """Sequence-like view over the corpus that re-streams from disk on every
+    iteration instead of holding all bugs in memory.
+
+    Supports the access patterns the analyzers use — repeated iteration and
+    len() — with peak memory of a single bug. Each full iteration re-parses
+    the JSON files, so a pass costs load time again; use load_all_bugs() when
+    the corpus fits in RAM and you need many passes to be fast.
+    """
+
+    def __init__(self, data_dir: Path = DATA_DIR):
+        self.data_dir = data_dir
+        self._len: Optional[int] = None
+
+    def __iter__(self) -> Iterator[BugEntry]:
+        return iter_bugs(self.data_dir)
+
+    def __len__(self) -> int:
+        if self._len is None:
+            # File count; decode-error files (skipped by iteration) are rare
+            # enough that the difference doesn't matter for progress totals.
+            self._len = sum(1 for _ in self.data_dir.glob("*.json"))
+        return self._len
 
 
 def bugs_with_evolution(bugs: list[BugEntry]) -> list[BugEntry]:
