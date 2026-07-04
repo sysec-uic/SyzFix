@@ -107,7 +107,7 @@ touching completed entries, and only unprocessed bugs are fetched. A periodic
 |---|---|
 | `python -m dataset.upload_hf --repo <user>/syzfix-dataset` | Upload the flat structured export |
 | `python -m dataset.upload_hf --repo … --processed` | Pack & upload the full per-bug data (~2 GB gz, streamed) |
-| `python -m dataset.upload_hf --repo … --training` | Upload training-task JSONLs (built in the research repo) |
+| `python -m dataset.upload_hf --repo … --training` | Upload training-task JSONLs — point at a separate repo (e.g. `…/syzfix-training`) to keep the main dataset raw-only |
 | `python -m dataset.main export --format jsonl\|huggingface` | Local export only, no upload |
 
 All upload commands support `--dry-run` and `--private`. Login once with

@@ -34,40 +34,44 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
 
-def build_records() -> list[dict]:
-    """Build all dataset records from processed bugs."""
-    from . import config  # noqa: F401
+def iter_records(stats: dict | None = None):
+    """Yield flat dataset records one bug at a time (constant memory).
+
+    Building all records in a list needs the whole corpus in RAM (~25 GB at
+    7k bugs) and gets OOM-killed; this generator keeps one bug at a time.
+    Pass a dict as `stats` to have counters filled in as a side effect.
+    """
     from .export import bug_to_dataset_entry
     from .storage import DataStore, ProgressDB
-    from .pipeline import _dict_to_bug  # noqa: F401
 
     store = DataStore()
     db = ProgressDB()
     processed_ids = db.get_bugs_at_step("processed")
     db.close()
 
-    records = []
-    skipped = 0
     for bug_id in processed_ids:
         data = store.load_processed(bug_id)
-        if not data:
-            skipped += 1
-            continue
-        entry = bug_to_dataset_entry(data)
-        if entry is None or (not entry.crash_report and not entry.final_patch_diff):
-            skipped += 1
+        if data:
+            entry = bug_to_dataset_entry(data)
+        if not data or entry is None or (not entry.crash_report and not entry.final_patch_diff):
+            if stats is not None:
+                stats["skipped"] = stats.get("skipped", 0) + 1
             continue
         record = asdict(entry)
         record["patch_evolution"] = json.dumps(record["patch_evolution"], ensure_ascii=False)
-        records.append(record)
-
-    logger.info(f"Built {len(records)} records ({skipped} skipped)")
-    return records
+        if stats is not None:
+            stats["total"] = stats.get("total", 0) + 1
+            for key, hit in (
+                ("crash_report", bool(record["crash_report"])),
+                ("patch_diff", bool(record["final_patch_diff"])),
+                ("discussion", bool(record["has_discussion"])),
+                ("evolution", record["num_patch_versions"] > 1),
+            ):
+                stats[key] = stats.get(key, 0) + hit
+        yield record
 
 
 def upload(repo_id: str, private: bool = False, dry_run: bool = False):
-    from . import config
-
     try:
         from datasets import Dataset
         from huggingface_hub import HfApi
@@ -85,48 +89,44 @@ def upload(repo_id: str, private: bool = False, dry_run: bool = False):
         print("Not logged in. Run: huggingface-cli login")
         return
 
-    logger.info("Building dataset records...")
-    records = build_records()
-    if not records:
-        print("No records to upload.")
-        return
-
-    # Print stats
-    print(f"\nDataset summary:")
-    print(f"  Total records         : {len(records)}")
-    print(f"  With crash report     : {sum(1 for r in records if r['crash_report'])}")
-    print(f"  With patch diff       : {sum(1 for r in records if r['final_patch_diff'])}")
-    print(f"  With discussion       : {sum(1 for r in records if r['has_discussion'])}")
-    print(f"  With patch evolution  : {sum(1 for r in records if r['num_patch_versions'] > 1)}")
+    stats: dict = {}
 
     if dry_run:
-        print(f"\n[dry-run] Would upload {len(records)} records to: {repo_id}")
+        for _ in iter_records(stats):
+            pass
+        _print_summary(stats)
+        print(f"\n[dry-run] Would upload {stats.get('total', 0)} records to: {repo_id}")
         return
 
-    logger.info(f"Uploading to HuggingFace Hub: {repo_id}")
-    dataset = Dataset.from_list(records)
+    # Stream records into an on-disk Arrow cache — never the whole corpus in
+    # RAM. push_to_hub then reads the cache memory-mapped and uploads parquet
+    # shards under data/.
+    logger.info("Building dataset (streaming into on-disk Arrow cache)...")
+    dataset = Dataset.from_generator(iter_records, gen_kwargs={"stats": stats})
+    if not len(dataset):
+        print("No records to upload.")
+        return
+    _print_summary(stats)
 
+    logger.info(f"Uploading to HuggingFace Hub: {repo_id}")
     dataset.push_to_hub(
         repo_id,
         private=private,
-        commit_message=f"Update dataset: {len(records)} syzbot fixed kernel bugs",
+        commit_message=f"Update dataset: {len(dataset)} syzbot fixed kernel bugs",
     )
 
     hub_url = f"https://huggingface.co/datasets/{repo_id}"
     print(f"\nDataset uploaded successfully!")
     print(f"View at: {hub_url}")
 
-    # Also upload the JSONL as a separate file for easy download
-    jsonl_path = config.DATASET_DIR / "syzbot_dataset.jsonl"
-    if jsonl_path.exists():
-        api.upload_file(
-            path_or_fileobj=str(jsonl_path),
-            path_in_repo="syzbot_dataset.jsonl",
-            repo_id=repo_id,
-            repo_type="dataset",
-            commit_message="Add JSONL export",
-        )
-        logger.info("Uploaded JSONL file")
+
+def _print_summary(stats: dict):
+    print(f"\nDataset summary:")
+    print(f"  Total records         : {stats.get('total', 0)} ({stats.get('skipped', 0)} skipped)")
+    print(f"  With crash report     : {stats.get('crash_report', 0)}")
+    print(f"  With patch diff       : {stats.get('patch_diff', 0)}")
+    print(f"  With discussion       : {stats.get('discussion', 0)}")
+    print(f"  With patch evolution  : {stats.get('evolution', 0)}")
 
 
 def _build_dataset_card(repo_id: str, task_splits: dict[str, dict[str, int]]) -> str:

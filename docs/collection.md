@@ -85,7 +85,9 @@ equivalents, if you need a single step:
    ```
 5. **Research-repo artifacts** — training JSONLs and the memory index are
    rebuilt from **syzfix-research** (see its README), then uploaded with
-   `--training` / `--memory` from there.
+   `--training` / `--memory` from there. Point those at a **separate** HF
+   repo (e.g. `…/syzfix-training`): the main dataset repo holds only the
+   raw data, and its card defines only the raw config.
 
 Note the upload of the full processed data repacks the whole corpus
 (~11 GB → ~2 GB gzipped, streamed with constant RAM); `dataset.update` skips
