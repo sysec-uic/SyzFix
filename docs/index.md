@@ -120,8 +120,6 @@ python -m dataset.view list
 
 <div class="grid cards" markdown>
 
-- :material-download: **[Reproducing](reproducing.md)** — use the pre-built
-  HF dataset, no crawling required
 - :material-magnify: **[Exploring](exploring.md)** — browse, search, and
   inspect individual bugs from the CLI
 - :material-chart-box: **[Analysis](analysis.md)** — 13 heuristic analyzers
@@ -134,6 +132,8 @@ python -m dataset.view list
 </div>
 
 <!--
+- :material-download: **[Reproducing](reproducing.md)** — use the pre-built
+  HF dataset, no crawling required
 - :material-layers-triple: **[Cross-layer](cross_layer.md)** — taxonomy,
   stack-overlap verification, hard-case mining
 -->
