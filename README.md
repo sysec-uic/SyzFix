@@ -42,19 +42,76 @@ python -m dataset.view build-index
 
 # List all bugs — V=patch versions, P=has patch, R=has C reproducer, D=has discussion
 python -m dataset.view list
-# Only bugs with a C reproducer (needed for crash reproduction)
-python -m dataset.view list --has-reproducer
 
-# Run all analyzers (Heuristic analyzers)
+# Run all analyzers and show the results
 python -m analysis.run_all
-
-# Print previously saved results without re-running (instant)
 python -m analysis.run_all --show
-python -m analysis.run_all --show --analyzer revision
 ```
 
 Data lives in `dataset/data/` by default; set `SYZFIX_DATA_DIR` to point at a
 data directory elsewhere (and `SYZFIX_RESULTS_DIR` for saved analyzer results).
+
+---
+
+## Command reference
+
+### Getting & updating the data
+
+| Command | What it does |
+|---|---|
+| `python -m dataset.restore_processed --repo xiaoguangwang/syzfix-dataset` | Download the pre-built dataset from HuggingFace (no crawling) |
+| `python -m dataset.update` | **One-command incremental update**: pull only new bugs from syzbot, rebuild the index, refresh analyzer results |
+| `python -m dataset.update --repo <user>/syzfix-dataset` | Same, then upload to HuggingFace (skipped automatically when nothing is new) |
+| `python -m dataset.main collect` | Raw crawl pipeline (resumable; `--limit N`, `--no-resume`, `--skip-patchwork`) |
+| `python -m dataset.retry_missing stats\|patches\|crashes` | Diagnose and backfill bugs with missing patches / crash reports |
+
+The collect pipeline is incremental by design: progress is tracked per bug in
+`dataset/data/progress.db`, the refreshed syzbot bug list is merged without
+touching completed entries, and only unprocessed bugs are fetched. A periodic
+`python -m dataset.update --repo …` therefore downloads just the delta.
+→ [docs/collection.md](docs/collection.md)
+
+### Exploring the dataset
+
+| Command | What it does |
+|---|---|
+| `python -m dataset.view list` | List bugs (`--has-reproducer`, `--cross-layer`, `--true-cross-layer`, …) |
+| `python -m dataset.view show <bug_id>` | Full record for one bug |
+| `python -m dataset.view crash\|patch\|discuss <bug_id>` | Crash report / patch diffs / review thread |
+| `python -m dataset.view diff <bug_id>` | What changed between patch versions |
+| `python -m dataset.view search <query>` | Search titles and crash signatures |
+| `python -m dataset.view random` | A random interesting bug |
+| `python -m dataset.view stats` | Dataset & cross-layer statistics |
+| `python -m dataset.view crosslayer <bug_id>` | Per-bug cross-layer classification |
+| `python -m dataset.view build-index` | Rebuild the fast-lookup index after new data |
+
+→ [docs/exploring.md](docs/exploring.md)
+
+### Analysis
+
+| Command | What it does |
+|---|---|
+| `python -m analysis.run_all` | Run all 13 heuristic analyzers (`--analyzer X`, `--sample N`) |
+| `python -m analysis.run_all --show` | Print previously saved results instantly |
+| `python -m analysis.plot_iteration_timeline` | Patch-iteration timeline figure (PNG/PDF/SVG) |
+| `python -m analysis.generate_case_study <bug_id>` | Paper-ready case-study narrative for a bug |
+| `python -m analysis.run_cross_layer_modes` | Cross-layer counts under strict/relax mode grid |
+| `python -m analysis.audit_cross_layer <bug_id>` | Decision trace of the cross-layer classifier |
+| `python -m analysis.viz_layer_bug <bug_id>` | Self-contained HTML layer visualization per bug |
+
+→ [docs/analysis.md](docs/analysis.md), [docs/cross_layer.md](docs/cross_layer.md)
+
+### Publishing to HuggingFace
+
+| Command | What it does |
+|---|---|
+| `python -m dataset.upload_hf --repo <user>/syzfix-dataset` | Upload the flat structured export |
+| `python -m dataset.upload_hf --repo … --processed` | Pack & upload the full per-bug data (~2 GB gz, streamed) |
+| `python -m dataset.upload_hf --repo … --training` | Upload training-task JSONLs (built in the research repo) |
+| `python -m dataset.main export --format jsonl\|huggingface` | Local export only, no upload |
+
+All upload commands support `--dry-run` and `--private`. Login once with
+`hf auth login`. → [docs/collection.md](docs/collection.md)
 
 ---
 
@@ -84,7 +141,8 @@ Each entry captures one fixed kernel bug end-to-end:
 | `patch_evolution` | lore.kernel.org | v1 → v2 → … diffs with inline discussions |
 | `discussion` | lore.kernel.org | Full reviewer email threads per version |
 
-**7,067 bugs** collected, of which 5,127 have a patch diff, 6,057 have
+**7,000+ bugs** collected (7,091 as of July 2026 — the dataset grows with
+each `dataset.update` run), of which 5,127 have a patch diff, 6,057 have
 mailing-list discussions, and 4,742 have a C reproducer. Up to 9 patch
 versions captured per bug.
 

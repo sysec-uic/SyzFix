@@ -29,38 +29,53 @@ Progress is saved to `dataset/data/progress.db` (SQLite) — simply re-run to re
 
 ## Adding new bugs from syzbot (incremental update)
 
-The crawler is incremental by default: `python -m dataset.main collect` refetches
-the current syzbot fixed-bug list, merges it into `progress.db` via `INSERT OR IGNORE`,
-and only processes bugs that have not yet reached `step=processed`. Existing
-processed bugs are skipped; only the delta (new bug IDs since the last run)
-is fetched. Watch for a log line like:
+One command pulls the delta, preps everything locally, and uploads:
+
+```bash
+# Local-only: incremental crawl + rebuild index + refresh analyzers
+python -m dataset.update
+
+# Same, then upload to HuggingFace (skipped automatically when nothing is new)
+python -m dataset.update --repo xiaoguangwang/syzfix-dataset
+
+# Useful flags
+python -m dataset.update --skip-analysis          # skip the analyzer refresh
+python -m dataset.update --repo … --dry-run       # show upload stats, upload nothing
+python -m dataset.update --repo … --force-upload  # upload even with 0 new bugs
+```
+
+### What it does under the hood
+
+The crawler is incremental by default: it refetches the current syzbot
+fixed-bug list, merges it into `progress.db` via `INSERT OR IGNORE`, and only
+processes bugs that have not yet reached `step=processed`. Existing processed
+bugs are skipped; only the delta (new bug IDs since the last run) is fetched.
+Watch for a log line like:
 
 ```
 Refreshed bug list: 119 new bugs since last run (7066 total)
 ```
 
-After the incremental crawl finishes, rebuild downstream artifacts (none of
-them support per-bug incremental updates — they rebuild from the full corpus):
+`dataset.update` then rebuilds the downstream artifacts (none of them support
+per-bug incremental updates — they rebuild from the full corpus). The manual
+equivalents, if you need a single step:
 
-1. **Re-export the flat JSONL**
-   ```bash
-   python -m dataset.main export --format jsonl
-   ```
-2. **Re-run the analyzers** (full run, ~2–3 min)
-   ```bash
-   python -m analysis.run_all
-   ```
-3. **Rebuild downstream artifacts** — training JSONLs and the memory index
-   are rebuilt from the research repo (**syzfix-research**); see its README.
-4. **Re-upload to HuggingFace**
+1. **Incremental crawl** — `python -m dataset.main collect`
+   (`--no-resume` forces a full re-crawl)
+2. **Rebuild the viewer index** — `python -m dataset.view build-index`
+3. **Re-run the analyzers** (~2–3 min) — `python -m analysis.run_all`
+4. **Upload** — flat export + full processed data:
    ```bash
    python -m dataset.upload_hf --repo xiaoguangwang/syzfix-dataset
-   python -m dataset.upload_hf --repo xiaoguangwang/syzfix-dataset --training
    python -m dataset.upload_hf --repo xiaoguangwang/syzfix-dataset --processed
-   python -m dataset.upload_hf --repo xiaoguangwang/syzfix-dataset --memory
    ```
+5. **Research-repo artifacts** — training JSONLs and the memory index are
+   rebuilt from **syzfix-research** (see its README), then uploaded with
+   `--training` / `--memory` from there.
 
-To force a full re-crawl instead, pass `--no-resume`.
+Note the upload of the full processed data repacks the whole corpus
+(~11 GB → ~2 GB gzipped, streamed with constant RAM); `dataset.update` skips
+the upload step entirely when the crawl found no new bugs.
 
 ## Monitor
 

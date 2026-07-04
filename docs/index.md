@@ -14,12 +14,15 @@ commit.
 
 | | |
 |---|---|
-| Fixed kernel bugs collected | **7,067** |
+| Fixed kernel bugs collected | **7,091** |
 | … with the merged patch diff | 5,127 |
 | … with full mailing-list discussions | 6,057 |
 | … with a C reproducer | 4,742 |
 | … with multi-version patch evolution | 1,117 |
 | Patch versions captured per bug | up to 9 (v1 → v2 → … → merged) |
+
+*As of July 2026 — the dataset tracks syzbot continuously and grows with each
+incremental update.*
 
 Each entry captures one bug end-to-end: the raw crash report (oops / KASAN /
 BUG), syzkaller and C reproducers, every patch revision posted to
