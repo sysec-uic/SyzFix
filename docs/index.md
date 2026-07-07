@@ -1,8 +1,7 @@
 # SyzFix
 
-<img src="assets/syzfix.png" align="right" width="200" alt="SyzFix Logo" />
-
 <div class="sf-hero" markdown>
+<div class="sf-hero-content" markdown>
 
 **The full lifecycle of 7,000+ fixed Linux kernel bugs** — from the syzbot
 crash report, through every patch revision and reviewer discussion on
@@ -12,6 +11,12 @@ lore.kernel.org, to the commit merged into `torvalds/linux`.
 [:simple-github: Browse the code](https://github.com/sysec-uic/syzfix){ .md-button }
 [Quick start :material-arrow-down:](#start-in-minutes){ .md-button }
 
+</div>
+<div class="sf-hero-image" markdown>
+
+<img src="assets/tux.png" width="220" alt="SyzFix Logo" />
+
+</div>
 </div>
 
 <div class="sf-stats" markdown>

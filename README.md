@@ -1,6 +1,6 @@
 # SyzFix
 
-<img src="docs/assets/syzfix.png" align="right" width="200" alt="SyzFix Logo" />
+<img src="docs/assets/tux.png" align="right" width="200" alt="SyzFix Logo" />
 
 **SyzFix** collects fixed Linux kernel bugs from [syzbot](https://syzkaller.appspot.com/upstream/fixed)
 and assembles a structured dataset capturing the **full bug-fix lifecycle** — from the initial crash
@@ -11,6 +11,8 @@ for researching patch evolution patterns in the Linux development process,
 and for studying **cross-layer kernel bugs** — bugs where the crash occurs in one
 architectural layer but the fix belongs in another (e.g., a specific filesystem crash
 fixed in the VFS layer).
+
+<br clear="both"/>
 
 > **Website & Documentation:** [https://sysec-uic.github.io/SyzFix/](https://sysec-uic.github.io/SyzFix/)  
 > **Code:** [https://github.com/sysec-uic/SyzFix](https://github.com/sysec-uic/SyzFix)  
