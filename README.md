@@ -1,5 +1,9 @@
 # SyzFix
 
+<p align="center">
+  <img src="docs/assets/syzfix.png" alt="SyzFix Logo" width="200"/>
+</p>
+
 **SyzFix** collects fixed Linux kernel bugs from [syzbot](https://syzkaller.appspot.com/upstream/fixed)
 and assembles a structured dataset capturing the **full bug-fix lifecycle** — from the initial crash
 report through patch iterations and reviewer discussions to the final merged commit.

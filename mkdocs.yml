@@ -6,6 +6,7 @@ repo_name: sysec-uic/syzfix
 
 theme:
   name: material
+  logo: assets/syzfix.png
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default

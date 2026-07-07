@@ -1,5 +1,9 @@
 # SyzFix
 
+<p align="center">
+  <img src="assets/syzfix.png" alt="SyzFix Logo" width="200"/>
+</p>
+
 <div class="sf-hero" markdown>
 
 **The full lifecycle of 7,000+ fixed Linux kernel bugs** — from the syzbot
