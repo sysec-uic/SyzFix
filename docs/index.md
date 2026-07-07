@@ -1,8 +1,6 @@
 # SyzFix
 
-<p align="center">
-  <img src="assets/syzfix.png" alt="SyzFix Logo" width="200"/>
-</p>
+<img src="assets/syzfix.png" align="right" width="200" alt="SyzFix Logo" />
 
 <div class="sf-hero" markdown>
 
