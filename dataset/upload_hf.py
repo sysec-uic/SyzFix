@@ -321,7 +321,22 @@ def upload_processed(repo_id: str, private: bool = False, dry_run: bool = False)
         print(f"Processed data not found at {processed_dir}")
         return
 
-    json_files = sorted(processed_dir.glob("*.json"))
+    # Take the bug list from the progress DB instead of globbing:
+    # PROCESSED_DIR also holds non-bug artifacts (e.g. cherrypick_map.json
+    # from the stable-cherrypick scraper) which would otherwise be packed
+    # into processed.jsonl.gz as a bogus record and counted as a bug.
+    # Matches iter_records() / the flat export.
+    from .storage import ProgressDB
+    db = ProgressDB()
+    try:
+        bug_ids = db.get_bugs_at_step("processed")
+    finally:
+        db.close()
+    json_files = sorted(processed_dir / f"{bug_id}.json" for bug_id in bug_ids)
+    missing = [f for f in json_files if not f.exists()]
+    if missing:
+        logger.warning(f"{len(missing)} bugs marked processed have no JSON on disk")
+        json_files = [f for f in json_files if f.exists()]
     total = len(json_files)
     raw_bytes = sum(f.stat().st_size for f in json_files)
     print(f"\nProcessed data to pack → {repo_id}")

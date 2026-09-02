@@ -32,9 +32,20 @@ from . import config
 
 
 def _count_processed() -> int:
-    if not config.PROCESSED_DIR.exists():
+    """Number of bugs at the 'processed' step, per the progress DB.
+
+    Globbing PROCESSED_DIR would also count non-bug artifacts written there
+    (e.g. cherrypick_map.json from the stable-cherrypick scraper), inflating
+    the total; the DB is the authoritative bug list.
+    """
+    if not config.DB_PATH.exists():
         return 0
-    return sum(1 for _ in config.PROCESSED_DIR.glob("*.json"))
+    from .storage import ProgressDB
+    db = ProgressDB()
+    try:
+        return len(db.get_bugs_at_step("processed"))
+    finally:
+        db.close()
 
 
 def _run_module(mod: str, *args: str) -> None:
