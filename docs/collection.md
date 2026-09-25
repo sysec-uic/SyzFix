@@ -58,10 +58,75 @@ stateless, so it would have to restore the full corpus (~2 GB download,
 ~11 GB unpacked) and re-upload it on every run just to fetch a handful of
 new bugs.
 
-The landing-page counts are generated from the local index, not hand-edited:
-after an update, run `python -m dataset.site_stats` to rewrite them in
-`docs/index.md` (`--check` only reports whether they are stale), then commit
-and push; the docs workflow redeploys the site.
+## Manual release checklist (maintainers)
+
+A full release has three parts: crawl the new bugs, push the data to
+HuggingFace, and refresh the website. Run everything from the project root
+on the machine that holds `dataset/data/`, with the venv activated.
+
+### 1. Crawl new fixed bugs from syzbot
+
+```bash
+python -m dataset.update                  # local only: crawl + index + analyzers
+```
+
+This is the same as the cron job, minus the upload. The run ends with a line
+like `Processed bugs: 7463 total (+49 this run)`. Check progress, or look for
+bugs that were missed, with:
+
+```bash
+python -m dataset.main stats              # pipeline progress per step
+python -m dataset.retry_missing stats     # what data is missing and why
+```
+
+### 2. Push the dataset to HuggingFace
+
+Log in once per machine with a token that has **write** access to
+`xiaoguangwang/syzfix-dataset`, then check who you are logged in as:
+
+```bash
+hf auth login
+hf auth whoami
+```
+
+Then upload. `dataset.update` uploads only when the crawl found new bugs.
+`--force-upload` uploads anyway, for example after a crawl whose upload failed
+or after `retry_missing` filled in data:
+
+```bash
+python -m dataset.update --repo xiaoguangwang/syzfix-dataset --dry-run        # preview only
+python -m dataset.update --repo xiaoguangwang/syzfix-dataset
+python -m dataset.update --repo xiaoguangwang/syzfix-dataset --force-upload   # upload with 0 new bugs
+```
+
+Every upload sends the whole corpus, so one successful upload also covers any
+earlier weekly uploads that failed. When a login expires, the cron log prints
+`Not logged in. Run: huggingface-cli login` and the upload is skipped without
+an error, so check `dataset/data/cron_update.log` for it. After uploading,
+the new commit shows up at
+<https://huggingface.co/datasets/xiaoguangwang/syzfix-dataset/commits/main>.
+
+### 3. Update the website
+
+The site is built from `docs/` by the `docs` GitHub Actions workflow on every
+push to `main`. The landing-page numbers come from the local index, so do not
+edit them by hand. Instead, regenerate them:
+
+```bash
+python -m dataset.site_stats --check      # are the numbers stale?
+python -m dataset.site_stats              # rewrite the stats block in docs/index.md
+git add docs/index.md
+git commit -m "docs: refresh landing-page stats"
+git push origin main
+```
+
+The site updates at <https://sysec-uic.github.io/SyzFix/> a minute or two after
+the workflow finishes (check the repo's **Actions** tab). To preview locally:
+
+```bash
+pip install mkdocs-material
+mkdocs serve                              # http://127.0.0.1:8000
+```
 
 ### What it does under the hood
 
