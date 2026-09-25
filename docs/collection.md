@@ -58,6 +58,11 @@ stateless, so it would have to restore the full corpus (~2 GB download,
 ~11 GB unpacked) and re-upload it on every run just to fetch a handful of
 new bugs.
 
+The landing-page counts are generated from the local index, not hand-edited:
+after an update, run `python -m dataset.site_stats` to rewrite them in
+`docs/index.md` (`--check` only reports whether they are stale), then commit
+and push; the docs workflow redeploys the site.
+
 ### What it does under the hood
 
 The crawler is incremental by default: it refetches the current syzbot

@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from pathlib import Path
 
 import click
 from tqdm import tqdm
@@ -42,7 +41,7 @@ def classify_missing_patches() -> dict[str, list[str]]:
     fetch_failed: list[str] = []     # has hash but diff is empty (fetch failed)
     ok: list[str] = []               # already have diff
 
-    for p in sorted(Path(config.PROCESSED_DIR).glob("*.json")):
+    for p in config.bug_files():
         d = json.loads(p.read_text())
         fcs = d.get("fix_commits", [])
         if not fcs:
@@ -71,7 +70,7 @@ def cli():
 @cli.command()
 def stats():
     """Show a breakdown of what data is missing and why."""
-    processed = list(Path(config.PROCESSED_DIR).glob("*.json"))
+    processed = config.bug_files()
     n = len(processed)
 
     patch_classes = classify_missing_patches()
@@ -145,7 +144,7 @@ def patches(limit, repos):
 def crashes(limit):
     """Retry fetching crash reports for bugs that are missing them."""
     missing = []
-    for p in sorted(Path(config.PROCESSED_DIR).glob("*.json")):
+    for p in config.bug_files():
         d = json.loads(p.read_text())
         if not any(c.get("crash_report") for c in d.get("crashes", [])):
             missing.append(d["bug_id"])

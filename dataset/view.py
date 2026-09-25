@@ -35,6 +35,8 @@ from pathlib import Path
 
 import click
 
+from dataset.config import bug_files
+
 PROCESSED_DIR = Path(__file__).parent / "data" / "processed"
 INDEX_FILE = Path(__file__).parent / "data" / "index.jsonl"
 RESULTS_DIR = Path(__file__).parent.parent / "analysis" / "results"
@@ -86,7 +88,7 @@ def build_index(show_progress: bool = True) -> int:
 
     Returns the number of bugs indexed.
     """
-    files = sorted(PROCESSED_DIR.glob("*.json"))
+    files = bug_files(PROCESSED_DIR)
     if show_progress:
         click.echo(f"Building index from {len(files)} bug files...", err=True)
 
@@ -141,7 +143,7 @@ def _ensure_index() -> list[dict]:
 def all_bugs() -> list[dict]:
     """Load all full bug dicts (slow — only used by show/crash/patch/discuss/diff)."""
     bugs = []
-    for p in sorted(PROCESSED_DIR.glob("*.json")):
+    for p in bug_files(PROCESSED_DIR):
         try:
             bugs.append(json.loads(p.read_text()))
         except Exception:
@@ -544,7 +546,7 @@ def cmd_search(keyword, limit, has_reproducer, deep):
     if deep:
         # Slow path: load full files to search complete crash reports
         results = []
-        for p in sorted(PROCESSED_DIR.glob("*.json")):
+        for p in bug_files(PROCESSED_DIR):
             try:
                 b = json.loads(p.read_text())
             except Exception:

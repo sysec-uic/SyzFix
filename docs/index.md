@@ -3,7 +3,7 @@
 <div class="sf-hero" markdown>
 <div class="sf-hero-content" markdown>
 
-**The full lifecycle of 7,000+ fixed Linux kernel bugs** — from the syzbot
+**The full lifecycle of 7,400+ fixed Linux kernel bugs** — from the syzbot
 crash report, through every patch revision and reviewer discussion on
 lore.kernel.org, to the commit merged into `torvalds/linux`.
 
@@ -19,17 +19,19 @@ lore.kernel.org, to the commit merged into `torvalds/linux`.
 </div>
 </div>
 
+<!-- stats:start -->
 <div class="sf-stats" markdown>
-  <div class="sf-stat"><span class="num">7,210</span><span class="label">fixed kernel bugs</span></div>
-  <div class="sf-stat"><span class="num">5,204</span><span class="label">merged patch diffs</span></div>
-  <div class="sf-stat"><span class="num">6,191</span><span class="label">review discussions</span></div>
-  <div class="sf-stat"><span class="num">4,802</span><span class="label">C reproducers</span></div>
-  <div class="sf-stat"><span class="num">1,157</span><span class="label">multi-version patch histories</span></div>
-  <div class="sf-stat"><span class="num">≤9</span><span class="label">patch versions per bug</span></div>
+  <div class="sf-stat"><span class="num">7,463</span><span class="label">fixed kernel bugs</span></div>
+  <div class="sf-stat"><span class="num">5,293</span><span class="label">merged patch diffs</span></div>
+  <div class="sf-stat"><span class="num">6,425</span><span class="label">review discussions</span></div>
+  <div class="sf-stat"><span class="num">4,957</span><span class="label">C reproducers</span></div>
+  <div class="sf-stat"><span class="num">1,227</span><span class="label">multi-version patch histories</span></div>
+  <div class="sf-stat"><span class="num">≤12</span><span class="label">patch versions per bug</span></div>
 </div>
 
-*Counts as of July 2026 — the dataset tracks syzbot continuously and grows
+*Counts as of September 2026 — the dataset tracks syzbot continuously and grows
 with each incremental update.*
+<!-- stats:end -->
 
 ---
 

@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional
 
-from dataset.config import PROCESSED_DIR
+from dataset.config import PROCESSED_DIR, bug_files
 
 # Path to the processed data directory (honors SYZFIX_DATA_DIR via dataset.config)
 DATA_DIR = PROCESSED_DIR
@@ -227,7 +227,7 @@ def load_all_bugs(data_dir: Path = DATA_DIR) -> list[BugEntry]:
     (~30 GB at 7k bugs); prefer LazyBugs when that doesn't comfortably fit.
     """
     bugs = []
-    for fname in sorted(data_dir.glob("*.json")):
+    for fname in bug_files(data_dir):
         bug = load_bug_file(fname)
         if bug is not None:
             bugs.append(bug)
@@ -236,7 +236,7 @@ def load_all_bugs(data_dir: Path = DATA_DIR) -> list[BugEntry]:
 
 def iter_bugs(data_dir: Path = DATA_DIR) -> Iterator[BugEntry]:
     """Iterate over all bugs without loading all into memory at once."""
-    for fname in sorted(data_dir.glob("*.json")):
+    for fname in bug_files(data_dir):
         bug = load_bug_file(fname)
         if bug is not None:
             yield bug
@@ -263,7 +263,7 @@ class LazyBugs:
         if self._len is None:
             # File count; decode-error files (skipped by iteration) are rare
             # enough that the difference doesn't matter for progress totals.
-            self._len = sum(1 for _ in self.data_dir.glob("*.json"))
+            self._len = len(bug_files(self.data_dir))
         return self._len
 
 

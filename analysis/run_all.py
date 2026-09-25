@@ -23,7 +23,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from analysis.loader import (
-    LazyBugs, load_all_bugs, load_bug_file,
+    LazyBugs, bug_files, load_all_bugs, load_bug_file,
     bugs_with_evolution, bugs_with_discussion,
 )
 from analysis.paths import RESULTS_DIR
@@ -287,7 +287,7 @@ Examples:
     # corpus per analyzer) but bounded memory. --in-memory preloads everything
     # for speed; the parsed corpus needs ~2-3x its on-disk size in RAM.
     if args.sample:
-        files = sorted(LazyBugs().data_dir.glob("*.json"))
+        files = bug_files(LazyBugs().data_dir)
         picked = random.sample(files, min(args.sample, len(files)))
         bugs = [b for b in map(load_bug_file, picked) if b is not None]
         print(f"  Sampled {len(bugs)} bugs for analysis")

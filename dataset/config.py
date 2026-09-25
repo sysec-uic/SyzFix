@@ -1,6 +1,7 @@
 """Configuration for syzbot dataset builder."""
 
 import os
+import re
 from pathlib import Path
 
 # === Project paths ===
@@ -16,6 +17,16 @@ PROCESSED_DIR = DATA_DIR / "processed"
 DATASET_DIR = DATA_DIR / "dataset"
 TRAINING_DIR = DATA_DIR / "training"
 DB_PATH = DATA_DIR / "progress.db"
+
+# Bug files are named by syzbot extid (20 or 40 hex chars). PROCESSED_DIR also
+# holds non-bug artifacts (e.g. cherrypick_map.json), so never glob "*.json".
+_BUG_FILE_RE = re.compile(r"[0-9a-f]{20,40}\.json")
+
+
+def bug_files(directory: Path = PROCESSED_DIR) -> list[Path]:
+    """Sorted per-bug JSON files in `directory`, skipping non-bug artifacts."""
+    return sorted(p for p in Path(directory).glob("*.json")
+                  if _BUG_FILE_RE.fullmatch(p.name))
 
 # === Syzbot API ===
 SYZBOT_BASE_URL = "https://syzkaller.appspot.com"
